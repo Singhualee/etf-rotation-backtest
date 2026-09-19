@@ -1,0 +1,901 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ETF 动量轮动策略回测 Pro（周四调仓 · 25日动量 · 避险）</title>
+<script src="echarts.min.js"></script>
+<script src="data.js"></script>
+<script src="engine.js"></script>
+<style>
+:root{
+  --bg:#f5f6f8; --card:#ffffff; --border:#e3e6ea; --text:#1c2530; --muted:#6b7684;
+  --accent:#d93831; --up:#d93831; --down:#1a9e6b;
+  --c-nasdaq:#2f6fed; --c-bond:#0f9e8e; --c-gold:#d99a1f; --c-csi:#7a5af5;
+  --c-eq:#8a93a0; --c-band:#b06a3b;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;
+  background:var(--bg);color:var(--text);padding:20px 24px 40px;max-width:1240px;margin:0 auto}
+h1{font-size:22px;font-weight:700}
+.sub{color:var(--muted);font-size:12.5px;margin-top:4px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px 18px;margin-top:14px}
+.card h2{font-size:15px;font-weight:600;margin-bottom:12px}
+.card h2 .hint{font-weight:400;color:var(--muted);font-size:12px;margin-left:8px}
+.controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:14px}
+select,input[type=date],button.seg{font-size:13px;padding:6px 12px;border:1px solid var(--border);border-radius:8px;
+  background:var(--card);color:var(--text);cursor:pointer}
+button.seg.active{background:var(--accent);border-color:var(--accent);color:#fff}
+label.rf{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:8px}
+label.rf input{width:150px;accent-color:var(--accent)}
+label.rf b{color:var(--text);min-width:34px;text-align:right}
+.metrics{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.metric{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px 14px}
+.metric .k{font-size:12px;color:var(--muted)}
+.metric .v{font-size:20px;font-weight:700;margin-top:4px;font-variant-numeric:tabular-nums}
+.metric .s{font-size:11px;color:var(--muted);margin-top:2px}
+.pos{color:var(--up)} .neg{color:var(--down)}
+.chart{width:100%;height:380px}
+.chart.tall{height:430px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:7px 10px;text-align:right;border-bottom:1px solid var(--border);font-variant-numeric:tabular-nums;white-space:nowrap}
+th{color:var(--muted);font-weight:600;font-size:12px}
+td:first-child,th:first-child{text-align:left}
+tr.hl td{font-weight:700}
+.tag{display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;color:#fff}
+.notes{font-size:12px;color:var(--muted);line-height:1.8}
+.notes code{background:#eef1f4;padding:1px 5px;border-radius:4px;font-size:11.5px}
+.scroll{max-height:420px;overflow:auto}
+.legendbox{display:flex;flex-wrap:wrap;gap:14px;font-size:12px;color:var(--muted);margin-top:6px}
+.legendbox span i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+</style>
+</head>
+<body>
+
+<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px">
+  <div>
+    <h1>ETF 动量轮动策略回测 Pro</h1>
+    <div class="sub" id="subtitle"></div>
+  </div>
+  <div style="flex-shrink:0;text-align:right">
+    <div>
+      <button class="seg" id="btnRefresh">↻ 刷新数据</button>
+      <button class="seg" id="btnSave" title="把当前数据固化为一个新网页文件下载, 用它替换旧文件即可永久保存">保存副本</button>
+    </div>
+    <div class="sub" id="refreshStatus" style="max-width:340px;margin-top:4px"></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="controls">
+    <button class="seg active" id="btnAll">全部区间</button>
+    <select id="yearSel"><option value="">按年查看…</option></select>
+    <select id="qSel"><option value="">按季度查看…</option></select>
+    <span style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)">自定义
+      <input type="date" id="customStart" title="自定义开始日期"> ~
+      <input type="date" id="customEnd" title="自定义结束日期">
+    </span>
+    <label class="rf">无风险利率 <input type="range" id="rfSlider" min="0" max="5" step="0.25" value="2"><b id="rfLabel">2%</b></label>
+    <label class="rf"><input type="checkbox" id="logChk">对数坐标</label>
+    <span style="display:inline-block;width:1px;height:22px;background:var(--border)"></span>
+    <span style="font-size:13px;color:var(--accent);font-weight:600">策略参数</span>
+    <label class="rf">调仓日
+      <select id="wdSel">
+        <option value="0">周一</option><option value="1">周二</option><option value="2">周三</option>
+        <option value="3" selected>周四</option><option value="4">周五</option>
+      </select>
+    </label>
+    <label class="rf">动量窗口
+      <select id="lbSel">
+        <option value="20">20日</option><option value="22">22日</option>
+        <option value="25" selected>25日</option><option value="30">30日</option>
+      </select>
+    </label>
+    <label class="rf"><input type="checkbox" id="riskOffChk" checked>避险（动量&lt;0 转国债）</label>
+    <label class="rf">切换成本
+      <select id="costSel">
+        <option value="0">0%</option><option value="0.001" selected>0.1%</option>
+      </select>
+    </label>
+  </div>
+</div>
+
+<div class="metrics" id="metricCards"></div>
+
+<div class="card">
+  <h2>净值对比<span class="hint">以所选窗口起点重设基数 = 1 · 窗口内指标已完整重算</span></h2>
+  <div id="navChart" class="chart tall"></div>
+  <div class="legendbox" id="navLegend"></div>
+</div>
+
+<div class="card">
+  <h2>策略回撤<span class="hint">净值相对窗口内历史峰值的跌幅</span></h2>
+  <div id="ddChart" class="chart"></div>
+</div>
+
+<div class="card">
+  <h2>持仓时间轴<span class="hint">策略全仓持有的 ETF（四色区分）· ● 为切换点</span></h2>
+  <div id="holdChart" style="width:100%;height:150px"></div>
+</div>
+
+<div class="card">
+  <h2>年度收益对比<span class="hint">完整回测区间逐年统计，不随窗口筛选变化</span></h2>
+  <div id="yearChart" class="chart"></div>
+</div>
+
+<div class="card">
+  <h2>窗口内策略与基准对比<span class="hint">按所选窗口完整重算，夏普与上方无风险利率一致</span></h2>
+  <div style="overflow-x:auto"><table id="cmpTable"></table></div>
+</div>
+
+<div class="card">
+  <h2>切换记录<span class="hint">窗口内全部调仓事件（含首次建仓）· 表格显示四只 ETF 当日动量</span></h2>
+  <div class="scroll"><table id="swTable"></table></div>
+</div>
+
+<div class="card notes">
+  <b>口径与假设说明</b><br>
+  1) <span id="stratNote"></span><br>
+  2) 信号与成交同用当日收盘价，无前视偏差；切换成本按参数区设置计提；价格为前复权收盘价。回测口径经 Python 独立实现交叉验证。<br>
+  3) 年化 = (1+总收益)^(252/交易日数) − 1；夏普 = (日均收益 − 日无风险利率)/日波动 × √252，无风险利率可用上方滑块调整（默认 2%）。<br>
+  4) 最大回撤 / 当前回撤按日频净值相对历史峰值计算；卡玛 = 年化收益 / 最大回撤；周度胜率按 ISO 周聚合。<br>
+  5) 等权每日再平衡 = 每日权重归一回 25%；等权 5% 带宽再平衡 = 期初各 25% 买入后持有，任一 ETF 权重偏离超过 5 个百分点（&lt;20% 或 &gt;30%）时当日收盘再平衡回等权。<br>
+  6) 数据（<span id="dataNote"></span>）：510300/511260 用不复权日线+分红表按<b>标准等比前复权</b>重建（除息日因子仅作用于之前日期，分红不会被计成当日下跌），分红表经 Wind 月度锚点核对；513100 保留前复权序列（历史含份额折算处理）。刷新时通过"不复权与前复权差值步进"自动识别新分红、经除息日跌幅校验后并入分红表。回测区间由四只 ETF 数据齐备日（518850 上市后满 20 个交易日）决定。<br>
+  7) 数据保存分三层：① 点击"刷新数据"成功后自动存入浏览器本地缓存（localStorage，固定约 280KB，每次覆盖不累积），下次打开自动加载；② 点"保存副本"首次选择本网页文件并授权后，之后每次刷新会自动把最新数据写回该文件（需 Chrome/Edge 支持）；③ 不支持写回的环境会自动下载一份嵌入了最新数据的网页副本，用它替换旧文件即可永久保存。<br>
+  8) 本结果仅为历史数据回放，不构成任何投资建议。
+</div>
+
+<script>
+(function(){
+'use strict';
+var COLORS = {'513100':'#2f6fed','511260':'#0f9e8e','518850':'#d99a1f','510300':'#7a5af5'};
+var APP_VER = 'Pro v1.0';   // 网页版本号, 显示在副标题便于分辨新旧副本
+var EQ_COLOR = '#8a93a0', BAND_COLOR = '#b06a3b', STRAT_COLOR = '#d93831';
+var etfs = ETF_DATA.etfs;
+// V2: 不复权+分红重建口径; 旧V1缓存为有缺陷的腾讯qfq数据, 自动作废
+var CACHE_KEY = 'etfRotationCacheV2';
+// 分红ETF清单: 刷新时走"不复权+分红表重建"管线(腾讯qfq为等差复权, 对分红ETF有系统性偏差)
+var DIV_CODES = {'510300':1, '511260':1};
+var cacheInfo = null;   // 启动时若浏览器缓存比内嵌数据新则使用
+(function(){
+  try{
+    var raw = localStorage.getItem(CACHE_KEY);
+    if(!raw) return;
+    var c = JSON.parse(raw);
+    if(!c || !c.etfs || c.etfs.length !== etfs.length || !c.endDate) return;
+    var embedded = '';
+    etfs.forEach(function(e){ var d=e.dates[e.dates.length-1]; if(d>embedded) embedded=d; });
+    if(c.endDate >= embedded){
+      var ok = true;
+      c.etfs.forEach(function(ce,k){
+        if(ce && ce.dates && ce.dates.length > 500 && ce.closes && ce.closes.length === ce.dates.length){
+          etfs[k].dates = ce.dates; etfs[k].closes = ce.closes;
+        } else ok = false;
+      });
+      if(ok) cacheInfo = c;
+      if(c.dividends) etfs.forEach(function(e){ if(c.dividends[e.code]) e.dividends = c.dividends[e.code]; });
+    }
+  }catch(e){}
+})();
+// ---- 策略参数(默认为优化结论: 周四调仓 + 25日动量 + 避险 + 0.1%切换成本) ----
+function stratOpts(){
+  return {
+    lookback: +document.getElementById('lbSel').value,
+    rebalanceWeekday: +document.getElementById('wdSel').value,
+    riskOff: document.getElementById('riskOffChk').checked ? {floor:0, bondCode:'511260'} : null,
+    costRate: +document.getElementById('costSel').value,
+  };
+}
+function stratTag(){
+  var wd=['周一','周二','周三','周四','周五'][+document.getElementById('wdSel').value];
+  return wd+'调仓/'+document.getElementById('lbSel').value+'日动量'+
+    (document.getElementById('riskOffChk').checked?'/避险':'')+
+    (+document.getElementById('costSel').value>0?'/含成本0.1%':'/零成本');
+}
+var bt = RotationEngine.runBacktest(etfs, stratOpts());
+var yearly = RotationEngine.yearlyReturns(bt);
+var rf = 0.02;
+var win = {i0:0, i1:bt.nav.length-1};   // 当前窗口索引
+var charts = [];
+
+function dataEndDate(){
+  var m='';
+  etfs.forEach(function(e){ var d=e.dates[e.dates.length-1]; if(d>m) m=d; });
+  return m;
+}
+function updateSubtitle(){
+  document.getElementById('subtitle').textContent =
+    '回测区间 ' + bt.dates[0] + ' ~ ' + bt.dates[bt.dates.length-1] +
+    '（' + bt.dates.length + ' 个交易日）· 调仓 ' + bt.rebCount + ' 次（含建仓）· 数据截至 ' + dataEndDate() +
+    ' · 策略 ' + stratTag() +
+    ' · 网页版本 ' + APP_VER;
+}
+updateSubtitle();
+document.getElementById('dataNote').textContent = ETF_DATA.meta.source + '，抓取于 ' + ETF_DATA.meta.fetchedAt;
+if (cacheInfo) {
+  document.getElementById('refreshStatus').textContent =
+    '已加载浏览器缓存数据（截至 ' + cacheInfo.endDate + '）';
+}
+
+// ---- 在线刷新数据（fetch 优先, JSONP 兜底; 成功后自动保存到浏览器本地缓存）----
+var PAGE = 640;
+function todayStr(){
+  var d=new Date(); return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2);
+}
+function withTimeout(p, ms, msg){
+  return new Promise(function(resolve,reject){
+    var t=setTimeout(function(){ reject(new Error(msg||'请求超时')); }, ms);
+    p.then(function(v){ clearTimeout(t); resolve(v); }, function(e){ clearTimeout(t); reject(e); });
+  });
+}
+function fetchJsonReal(url){
+  return withTimeout(fetch(url).then(function(r){
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    return r.json();
+  }), 12000);
+}
+function jsonp(url){
+  if (window.__wbJsonpImpl) return window.__wbJsonpImpl(url);  // 测试钩子
+  return new Promise(function(resolve,reject){
+    var done=false, s=null;
+    window.__wbJsonpCb = function(data){ done=true; resolve(data); };
+    function cleanup(){ if(s&&s.parentNode) s.parentNode.removeChild(s); window.__wbJsonpCb = function(){}; }
+    s=document.createElement('script');
+    s.src = url + '&_var=__wbJsonpCb';
+    s.onload=cleanup; s.onerror=function(){ if(!done){done=true; reject(new Error('网络请求失败'));} cleanup(); };
+    document.head.appendChild(s);
+    setTimeout(function(){ if(!done){done=true; reject(new Error('请求超时')); cleanup();} }, 12000);
+  });
+}
+function fetchJson(url){   // fetch 优先(接口支持CORS), 失败退回JSONP, 每请求重试1次
+  var attempt = 0;
+  function go(){
+    attempt++;
+    var p = (window.fetch && !window.__wbForceJsonp) ? fetchJsonReal(url)
+          : (window.__wbJsonpImpl ? window.__wbJsonpImpl(url) : jsonp(url));
+    return p.catch(function(err){
+      if (attempt >= 2) throw err;
+      return go();
+    });
+  }
+  return go();
+}
+function saveCache(){
+  try{
+    var divmap={};
+    etfs.forEach(function(e){ divmap[e.code]=e.dividends||(ETF_DATA.dividends&&ETF_DATA.dividends[e.code])||[]; });
+    localStorage.setItem(CACHE_KEY, JSON.stringify({
+      savedAt: todayStr(), endDate: dataEndDate(), dividends: divmap,
+      etfs: etfs.map(function(e){ return {code:e.code,label:e.label,symbol:e.symbol,dates:e.dates,closes:e.closes}; })
+    }));
+    return true;
+  }catch(e){ return false; }
+}
+// 抓取单个符号完整日线(分页回溯); fq='' 不复权, 'qfq' 腾讯前复权
+function fetchSeries(symbol, fq, onPage){
+  var all=[], end=todayStr();
+  function once(){
+    var url='https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param='+symbol+',day,,'+end+','+PAGE+','+fq;
+    if(onPage) onPage();
+    return fetchJson(url).then(function(res){
+      var d = res && res.data && res.data[symbol];
+      var rows = d ? (d.day || d.qfqday || []) : [];
+      if(!rows.length) return;
+      // 抓取方向为从新到旧回溯, 不能用"仅接受更晚日期"的防重条件(会把回溯页全部滤掉),
+      // 无条件收集, 最终统一去重排序
+      rows.forEach(function(r){
+        var c=parseFloat(r[2]);
+        if(r[0] && isFinite(c)) all.push([r[0],c]);
+      });
+      if(rows.length < PAGE) return;               // 已到上市首日
+      var earliest = rows[0][0];
+      var dt=new Date(earliest.replace(/-/g,'/')); dt.setDate(dt.getDate()-1);
+      end = dt.getFullYear()+'-'+('0'+(dt.getMonth()+1)).slice(-2)+'-'+('0'+dt.getDate()).slice(-2);
+      return once();
+    });
+  }
+  return once().then(function(){
+    all.sort(function(a,b){return a[0]<b[0]?-1:a[0]>b[0]?1:0;});
+    var uniq=[], last='';
+    all.forEach(function(r){ if(r[0]!==last){ uniq.push(r); last=r[0]; } });
+    return {dates:uniq.map(function(r){return r[0];}), closes:uniq.map(function(r){return r[1];})};
+  });
+}
+// ---- 分红ETF(510300/511260)专用: 不复权 + 分红表 → 标准等比前复权 ----
+// qfq差值步进识别候选分红: 腾讯qfq为等差复权, diff=raw-qfq 在除息日的回落值恰为每份分红
+function detectCandidates(dates, rawCloses, qfqMap){
+  var cands=[], prev=0;
+  for(var i=0;i<dates.length;i++){
+    var q=qfqMap.get(dates[i]); if(q===undefined) continue;
+    var diff=rawCloses[i]-q, step=diff-prev;
+    if(step < -0.01) cands.push({date:dates[i], D:+(-step).toFixed(4)});
+    prev=diff;
+  }
+  return cands;
+}
+// 腾讯等差qfq的步进落点可能与真实除息日差数日, 在±8个交易日内用"隔夜跌幅≈分红额"校准
+function refineDate(dates, closes, cand){
+  var idx=dates.indexOf(cand.date);
+  if(idx<0) return null;
+  var best=null;
+  for(var i=Math.max(1,idx-8); i<=Math.min(dates.length-1,idx+8); i++){
+    var drop=closes[i-1]-closes[i], err=Math.abs(drop-cand.D);
+    if(!best || err<best.err) best={err:err, date:dates[i]};
+  }
+  var confirmed = best && best.err <= Math.max(0.3*cand.D, 0.02);
+  return {D:cand.D, date:best?best.date:cand.date, confirmed:confirmed};
+}
+// 已知判定: 内嵌分红表(经Wind月度锚点校准)中金额相近且日期±15天 → 视为同一条, 内嵌优先
+function isKnown(cand, embedded){
+  var t=new Date(cand.date).getTime();
+  return (embedded||[]).some(function(d){
+    var dt=Math.abs(new Date(d[0]).getTime()-t)/86400000;
+    return dt<=15 && Math.abs(d[1]-cand.D)<=Math.max(0.2*cand.D, 0.01);
+  });
+}
+// 标准等比前复权: 除息日因子 f=(前收-D)/前收 仅作用于严格早于除息日的收盘价,
+// 除息日当天起为不复权原价 → 分红不会被计成当日下跌
+function rebuildQfq(dates, closes, divs){
+  if(!divs || !divs.length) return closes;
+  var factors=dates.map(function(){return 1;});
+  divs.forEach(function(dv){
+    var t=dv[0], D=dv[1], idx=-1;
+    for(var i=0;i<dates.length && dates[i]<t;i++) idx=i;
+    if(idx<0) return;
+    var pc=closes[idx], f=(pc-D)/pc;
+    if(!(f>0 && f<1)) return;                  // 异常分红记录不应用
+    for(var j=0;j<=idx;j++) factors[j]*=f;
+  });
+  return dates.map(function(_,i){ return +(closes[i]*factors[i]).toFixed(4); });
+}
+// 单只ETF完整刷新:
+//  - 513100/518850: 腾讯qfq直接使用(513100历史含份额折算, qfq为与Wind一致的口径)
+//  - 510300/511260: 不复权全史 + qfq差值识别新分红 + 分红表等比重建(标准口径)
+function fetchSymbol(symbol, code, onPage){
+  var embedded = (ETF_DATA.dividends && ETF_DATA.dividends[code]) || [];
+  if(!DIV_CODES[code]){
+    return fetchSeries(symbol,'qfq',onPage).then(function(s){
+      return {dates:s.dates, closes:s.closes, dividends:embedded, divNote:''};
+    });
+  }
+  return fetchSeries(symbol,'',onPage).then(function(raw){
+    if(!raw.dates.length) throw new Error(code+' 不复权数据为空');
+    return fetchSeries(symbol,'qfq',onPage).catch(function(){ return null; }).then(function(q){
+      var note='';
+      var news=[];
+      if(q){
+        var qm=new Map(); q.dates.forEach(function(d,i){ qm.set(d,q.closes[i]); });
+        detectCandidates(raw.dates, raw.closes, qm).forEach(function(c){
+          var r=refineDate(raw.dates, raw.closes, c);
+          if(r && !isKnown(r, embedded)) news.push(r);
+        });
+        if(news.length){
+          note = '，新识别分红'+news.length+'条' +
+                 (news.some(function(r){return !r.confirmed;}) ? '（部分未经跌幅确认，建议核对公告）' : '');
+        }
+      } else {
+        note = '，前复权核对不可用，分红沿用内置表';
+      }
+      var m=new Map();
+      embedded.forEach(function(d){ m.set(d[0], d[1]); });
+      news.forEach(function(r){ if(!m.has(r.date)) m.set(r.date, r.D); });
+      var divs=Array.from(m.entries()).sort(function(a,b){return a[0]<b[0]?-1:1;});
+      return {dates:raw.dates, closes:rebuildQfq(raw.dates, raw.closes, divs), dividends:divs, divNote:note};
+    });
+  });
+}
+// ---- 本地文件持久化: 写回网页文件(File System Access API) + 副本下载兜底 ----
+var PAGE_SOURCE = null, DATA_SCRIPT_TEXT = null;
+(function(){
+  try{
+    var ss = document.getElementsByTagName('script');
+    for(var si=0; si<ss.length; si++){
+      var t = ss[si].textContent || '';
+      if(t.indexOf('var ETF_DATA') >= 0){ DATA_SCRIPT_TEXT = t; break; }
+    }
+    PAGE_SOURCE = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
+  }catch(e){}
+})();
+function buildUpdatedHtml(){
+  var payload = {
+    meta: { fetchedAt: todayStr(), source: ETF_DATA.meta.source,
+            commonStart: ETF_DATA.meta.commonStart, riskFreeRate: ETF_DATA.meta.riskFreeRate,
+            endDate: dataEndDate() },
+    dividends: (function(){
+      var m={};
+      etfs.forEach(function(e){ m[e.code]=e.dividends||(ETF_DATA.dividends&&ETF_DATA.dividends[e.code])||[]; });
+      return m;
+    })(),
+    etfs: etfs.map(function(e){ return {code:e.code,label:e.label,symbol:e.symbol,dates:e.dates,closes:e.closes}; })
+  };
+  var idx = DATA_SCRIPT_TEXT.indexOf('var ETF_DATA');
+  var updatedScript = DATA_SCRIPT_TEXT.slice(0, idx) + 'var ETF_DATA = ' + JSON.stringify(payload) + ';';
+  var html = PAGE_SOURCE.replace(DATA_SCRIPT_TEXT, updatedScript);
+  window.__lastSavedHtml = html;   // 测试钩子
+  return html;
+}
+var fileHandle = null;
+function restoreHandle(cb){
+  if(!window.indexedDB){ cb(); return; }
+  try{
+    var req = indexedDB.open('etfRotationFSPro', 1);
+    req.onupgradeneeded = function(){ req.result.createObjectStore('h'); };
+    req.onsuccess = function(){
+      try{
+        var g = req.result.transaction('h').objectStore('h').get('html');
+        g.onsuccess = function(){ fileHandle = g.result || null; cb(); };
+        g.onerror = function(){ cb(); };
+      }catch(e){ cb(); }
+    };
+    req.onerror = function(){ cb(); };
+  }catch(e){ cb(); }
+}
+function persistHandle(){
+  try{
+    if(!window.indexedDB || !fileHandle) return;
+    var req = indexedDB.open('etfRotationFSPro', 1);
+    req.onupgradeneeded = function(){ req.result.createObjectStore('h'); };
+    req.onsuccess = function(){
+      var tx = req.result.transaction('h','readwrite');
+      tx.objectStore('h').put(fileHandle, 'html');
+    };
+  }catch(e){}
+}
+function writeHandle(html){
+  return new Promise(function(resolve,reject){
+    fileHandle.createWritable().then(function(w){
+      w.write(new Blob([html], {type:'text/html'})).then(function(){ return w.close(); })
+       .then(function(){ persistHandle(); resolve(true); }, reject);
+    }, reject);
+  });
+}
+function downloadCopy(){
+  return new Promise(function(resolve){
+    try{
+      if(!PAGE_SOURCE || !DATA_SCRIPT_TEXT){ resolve({ok:false,msg:'当前环境无法生成网页副本'}); return; }
+      var blob = new Blob([buildUpdatedHtml()], {type:'text/html'});
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'ETF动量轮动回测Pro_数据截至' + dataEndDate() + '.html';
+      document.body.appendChild(a); a.click();
+      setTimeout(function(){ try{URL.revokeObjectURL(a.href);}catch(e){} if(a.parentNode) a.parentNode.removeChild(a); }, 5000);
+      resolve({ok:true});
+    }catch(e){ resolve({ok:false,msg:e.message}); }
+  });
+}
+// 刷新成功后的自动持久化: 已关联文件→直接写回; 否则→自动下载副本
+async function autoPersist(){
+  if (fileHandle && window.showSaveFilePicker){
+    try{
+      var perm = await fileHandle.queryPermission({mode:'readwrite'});
+      if (perm === 'granted'){ await writeHandle(buildUpdatedHtml()); return '，已自动写回网页文件'; }
+      return '，网页文件写权限待确认（点"保存副本"授权后可自动写回）';
+    }catch(e){ return '，自动写回网页文件失败（' + e.message + '）'; }
+  }
+  var r = await downloadCopy();
+  return r.ok ? '，已自动下载更新后的网页副本（用它替换旧文件即可永久保存）'
+              : '，网页副本下载失败（' + r.msg + '）';
+}
+document.getElementById('btnSave').onclick = async function(){
+  var st = document.getElementById('refreshStatus'), btn = this;
+  btn.disabled = true;
+  try{
+    if (window.showSaveFilePicker){
+      if (!fileHandle){
+        fileHandle = await window.showSaveFilePicker({
+          suggestedName: 'ETF动量轮动回测Pro.html',
+          types: [{description:'网页文件', accept:{'text/html':['.html']}}]
+        });
+      } else {
+        var perm = await fileHandle.queryPermission({mode:'readwrite'});
+        if (perm !== 'granted') perm = await fileHandle.requestPermission({mode:'readwrite'});
+        if (perm !== 'granted') throw new Error('未获得文件写权限');
+      }
+      await writeHandle(buildUpdatedHtml());
+      st.textContent = '✓ 已保存到所选网页文件，之后点"刷新数据"会自动写回该文件（重新打开文件即见新数据）';
+    } else {
+      var r = await downloadCopy();
+      st.textContent = r.ok ? '✓ 已下载更新后的网页副本，用它替换旧文件即可（当前浏览器不支持直接写回文件）'
+                            : '✗ 保存失败：' + r.msg;
+    }
+  }catch(e){
+    st.textContent = (e && e.name === 'AbortError') ? '已取消保存' : '✗ 保存失败：' + e.message;
+  }
+  btn.disabled = false;
+};
+// 启动时恢复上次的文件关联
+restoreHandle(function(){
+  if (fileHandle && window.showSaveFilePicker){
+    fileHandle.queryPermission({mode:'readwrite'}).then(function(p){
+      if (p === 'granted'){
+        var st = document.getElementById('refreshStatus');
+        st.textContent = (st.textContent ? st.textContent + ' · ' : '') + '已关联本地网页文件，刷新后将自动写回';
+      }
+    }).catch(function(){});
+  }
+});
+
+document.getElementById('btnRefresh').onclick = async function(){
+  var btn=this, st=document.getElementById('refreshStatus');
+  btn.disabled=true; st.textContent='正在更新数据…';
+  var results=[], i=0;
+  async function next(){
+    if(i>=etfs.length){
+      // 全部成功才应用（避免部分更新导致口径不一致）
+      var divNotes=[];
+      for(var k=0;k<etfs.length;k++){
+        etfs[k].dates=results[k].dates; etfs[k].closes=results[k].closes;
+        if(results[k].dividends && results[k].dividends.length) etfs[k].dividends=results[k].dividends;
+        if(results[k].divNote) divNotes.push(results[k].divNote);
+      }
+      var divmap={};
+      etfs.forEach(function(e){ divmap[e.code]=e.dividends||(ETF_DATA.dividends&&ETF_DATA.dividends[e.code])||[]; });
+      ETF_DATA.dividends=divmap;
+      ETF_DATA.meta.source='腾讯行情接口(不复权)+分红等比前复权重构';
+      bt = RotationEngine.runBacktest(etfs, stratOpts());
+      yearly = RotationEngine.yearlyReturns(bt);
+      rebuildTimeSelectors();
+      document.getElementById('dataNote').textContent = ETF_DATA.meta.source + '，抓取于 ' + todayStr();
+      setCustomBounds();
+      if(!restoreWindowPref()){ win={i0:0,i1:bt.nav.length-1}; markActive('all'); renderAll(); }
+      renderYearChart(); renderNavLegend();
+      updateSubtitle();
+      var saved = saveCache();
+      var extra = await autoPersist();
+      st.textContent = '✓ 已更新至 ' + bt.dates[bt.dates.length-1] +
+        (saved ? '，已存浏览器缓存' : '（浏览器缓存保存失败，仅本次生效）') + extra +
+        divNotes.join('；');
+      btn.disabled=false;
+      return;
+    }
+    var e=etfs[i], page=0;
+    st.textContent = '正在更新 '+e.label+' '+e.code+'…';
+    fetchSymbol(e.symbol, e.code, function(){ page++; st.textContent = '正在更新 '+e.label+' '+e.code+'…第'+page+'页'; }).then(function(nd){
+      if(nd.dates.length < 500) throw new Error(e.code+' 返回数据异常（'+nd.dates.length+' 行）');
+      results[i]=nd; i++; next();
+    }).catch(function(err){
+      st.textContent = '✗ 更新失败：'+err.message+'（保留原数据）';
+      btn.disabled=false;
+    });
+  }
+  await next();
+};
+
+// ---- 时间筛选控件 ----
+var yearSel = document.getElementById('yearSel'), qSel = document.getElementById('qSel');
+var years = [], quarters = [];
+bt.dates.forEach(function(d){
+  var y = d.slice(0,4), q = y + 'Q' + (Math.floor((+d.slice(5,7)-1)/3)+1);
+  if (years.indexOf(y)<0) years.push(y);
+  if (quarters.indexOf(q)<0) quarters.push(q);
+});
+years.slice(1).forEach(function(y){  // 首年不完整, 仍提供但标注
+  var o = document.createElement('option'); o.value='y'+y; o.textContent=y+' 年'; yearSel.appendChild(o);
+});
+quarters.forEach(function(q){
+  var o=document.createElement('option'); o.value='q'+q;
+  o.textContent = q.slice(0,4)+' 年第 '+q.slice(5)+' 季度'; qSel.appendChild(o);
+});
+
+function pad(x){return (x<10?'0':'')+x}
+function lowerBound(d){ var i=0; while(i<bt.dates.length && bt.dates[i]<d) i++; return i; }
+function upperBound(d){ var i=bt.dates.length-1; while(i>=0 && bt.dates[i]>d) i--; return i; }
+
+// ---- 时间区间选择: 全部 / 按年 / 按季度 / 自定义起止(自动记住上次选择) ----
+var customStart=document.getElementById('customStart'), customEnd=document.getElementById('customEnd');
+var PREF_KEY='etfRotationWindowV1';
+function setCustomBounds(){
+  var mn=bt.dates[0], mx=dataEndDate();
+  customStart.min=customEnd.min=mn; customStart.max=customEnd.max=mx;
+}
+setCustomBounds();
+function loadPref(){ try{ return JSON.parse(localStorage.getItem(PREF_KEY)); }catch(e){ return null; } }
+function savePref(sel){ try{ localStorage.setItem(PREF_KEY, JSON.stringify(sel)); }catch(e){} }
+function markActive(type, sel){
+  document.querySelectorAll('.controls button.seg, .controls select').forEach(function(e){e.classList.remove('active')});
+  yearSel.value = (type==='year' && sel) ? 'y'+sel.y : '';
+  qSel.value = (type==='quarter' && sel) ? 'q'+sel.q : '';
+  if(type==='year') yearSel.classList.add('active');
+  else if(type==='quarter') qSel.classList.add('active');
+  else if(type==='all') document.getElementById('btnAll').classList.add('active');
+}
+// 统一入口: sel={type:'all'|'year'|'quarter'|'custom', ...}; 返回是否成功应用
+// 自定义日期自动收敛到数据范围内, 起止倒置自动交换
+function applySelection(sel){
+  var type=(sel && sel.type) || 'all', i0=0, i1=bt.nav.length-1;
+  if(type==='year' && sel.y){
+    i0=lowerBound(sel.y+'-01-01'); i1=upperBound(sel.y+'-12-31');
+  } else if(type==='quarter' && sel.q){
+    var y=sel.q.slice(0,4), m=(+sel.q.slice(5)-1)*3+1;
+    i0=lowerBound(y+'-'+pad(m)+'-01');
+    i1=upperBound(y+'-'+pad(m+2)+'-'+pad(new Date(+y, m+2, 0).getDate()));
+  } else if(type==='custom' && sel.s && sel.e){
+    var s=sel.s<bt.dates[0]?bt.dates[0]:sel.s;
+    var e2=sel.e>dataEndDate()?dataEndDate():sel.e;
+    if(s>e2){ var t=s; s=e2; e2=t; }
+    i0=lowerBound(s); i1=upperBound(e2);
+    customStart.value=s; customEnd.value=e2;
+  } else type='all';
+  if(i0>i1) return false;
+  win={i0:i0, i1:i1};
+  markActive(type, sel);
+  savePref(type==='all' ? {type:'all'} : sel);
+  renderAll();
+  return true;
+}
+document.getElementById('btnAll').onclick = function(){ applySelection({type:'all'}); };
+yearSel.onchange = function(){
+  if(!yearSel.value) return;
+  applySelection({type:'year', y:yearSel.value.slice(1)});
+};
+qSel.onchange = function(){
+  if(!qSel.value) return;
+  applySelection({type:'quarter', q:qSel.value.slice(1)});
+};
+function applyCustom(){
+  if(!customStart.value || !customEnd.value) return;
+  if(!applySelection({type:'custom', s:customStart.value, e:customEnd.value})){
+    customStart.value=bt.dates[win.i0]; customEnd.value=bt.dates[win.i1];
+  }
+}
+customStart.onchange = applyCustom;
+customEnd.onchange = applyCustom;
+// 下次打开自动恢复上次所选区间
+function restoreWindowPref(){
+  var p = loadPref();
+  return !!(p && applySelection(p));
+}
+
+// ---- 无风险利率 ----
+var rfSlider = document.getElementById('rfSlider');
+rfSlider.oninput = function(){
+  rf = +rfSlider.value/100;
+  document.getElementById('rfLabel').textContent = rfSlider.value + '%';
+  renderMetrics(); renderCmpTable();
+};
+document.getElementById('logChk').onchange = renderNavChart;
+
+// ---- 策略参数变更: 重跑引擎并全量重渲染 ----
+function rebuildTimeSelectors(){
+  yearSel.innerHTML = '<option value="">按年查看…</option>';
+  qSel.innerHTML = '<option value="">按季度查看…</option>';
+  years = []; quarters = [];
+  bt.dates.forEach(function(d){
+    var y = d.slice(0,4), q = y + 'Q' + (Math.floor((+d.slice(5,7)-1)/3)+1);
+    if (years.indexOf(y)<0) years.push(y);
+    if (quarters.indexOf(q)<0) quarters.push(q);
+  });
+  years.slice(1).forEach(function(y){
+    var o = document.createElement('option'); o.value='y'+y; o.textContent=y+' 年'; yearSel.appendChild(o);
+  });
+  quarters.forEach(function(q){
+    var o=document.createElement('option'); o.value='q'+q;
+    o.textContent = q.slice(0,4)+' 年第 '+q.slice(5)+' 季度'; qSel.appendChild(o);
+  });
+}
+function updateStrategyNote(){
+  var wd=['周一','周二','周三','周四','周五'][+document.getElementById('wdSel').value];
+  var ro=document.getElementById('riskOffChk').checked;
+  var cost=+document.getElementById('costSel').value;
+  document.getElementById('stratNote').innerHTML =
+    '策略：每<b>'+wd+'</b>（休市则顺延至当周下一交易日；若当周已无则提前至当周最后交易日，每周恰好调仓一次）收盘比较四只 ETF 过去 <b>'+
+    document.getElementById('lbSel').value+'</b> 个交易日涨幅，全仓持有最强者；并列时保持原持仓；数据不足者不参与比较。'+
+    '避险规则<b>'+(ro?'开启':'关闭')+'</b>'+(ro?'：最强动量 &lt; 0 时，全仓转入 511260 十年国债ETF。':'。')+
+    '每次实际切换按 <b>'+(cost>0?(cost*100).toFixed(1)+'%':'0（不计成本）')+'</b> 扣减净值（建仓与"决定不切换"不产生交易成本）。';
+}
+['wdSel','lbSel','riskOffChk','costSel'].forEach(function(id){
+  document.getElementById(id).onchange = function(){
+    bt = RotationEngine.runBacktest(etfs, stratOpts());
+    yearly = RotationEngine.yearlyReturns(bt);
+    rebuildTimeSelectors();
+    setCustomBounds();
+    win = {i0:0, i1:bt.nav.length-1};
+    markActive('all');
+    updateStrategyNote();
+    renderAll(); renderYearChart(); updateSubtitle();
+  };
+});
+updateStrategyNote();
+
+// ---- 指标卡 ----
+function fmtPct(x,sign){ if(x===null||x===undefined||isNaN(x))return '—';
+  var s=(x*100).toFixed(2)+'%'; if(!sign)return s; return (x>=0?'+':'')+s; }
+function cls(x){ return x>=0?'pos':'neg'; }
+function pseudoBT(arr){ return {dates:bt.dates, nav:arr, holding:[], switches:[]}; }
+
+function renderMetrics(){
+  var m = RotationEngine.computeMetrics(bt,{rf:rf,i0:win.i0,i1:win.i1});
+  var cards = [
+    {k:'总收益率', v:fmtPct(m.total,true), c:cls(m.total), s:'期末/期初 − 1'},
+    {k:'年化收益率', v:fmtPct(m.annualized,true), c:cls(m.annualized), s:'(1+总收益)^(252/天数) − 1'},
+    {k:'夏普比率', v:m.sharpe.toFixed(3), c:'', s:'无风险利率 '+(rf*100).toFixed(2)+'%'},
+    {k:'最大回撤', v:fmtPct(-m.maxDD), c:'neg', s:'日频净值相对峰值'},
+    {k:'当前回撤', v:fmtPct(-m.currentDD), c: m.currentDD>0.001?'neg':'', s:'相对历史峰值'},
+    {k:'年化波动率', v:fmtPct(m.vol), c:'', s:'日收益标准差 × √252'},
+    {k:'卡玛比率', v:m.calmar===null?'—':m.calmar.toFixed(3), c:'', s:'年化收益 / 最大回撤'},
+    {k:'周度胜率', v:(m.weeklyWinRate*100).toFixed(1)+'%', c:'', s:m.weeks+' 个完整周'},
+    {k:'切换次数', v:String(m.switches), c:'', s:'窗口内实际切换'},
+    {k:'交易日数', v:String(m.tradingDays), c:'', s:bt.dates[win.i0]+' ~ '+bt.dates[win.i1]},
+  ];
+  document.getElementById('metricCards').innerHTML = cards.map(function(c){
+    return '<div class="metric"><div class="k">'+c.k+'</div><div class="v '+c.c+'">'+c.v+'</div><div class="s">'+c.s+'</div></div>';
+  }).join('');
+}
+
+// ---- 净值图 ----
+function windowSeries(arr){
+  var out=[], base=arr[win.i0];
+  for(var i=win.i0;i<=win.i1;i++) out.push([bt.dates[i], arr[i]/base]);
+  return out;
+}
+function renderNavChart(){
+  var chart = getChart('navChart');
+  var series = [{name:'动量轮动策略', data:windowSeries(bt.nav), color:STRAT_COLOR, w:2.6}];
+  etfs.forEach(function(e,k){
+    series.push({name:e.label+' '+e.code, data:windowSeries(bt.benchmarks[k]), color:COLORS[e.code], w:1.3});
+  });
+  series.push({name:'等权每日再平衡', data:windowSeries(bt.equalNav), color:EQ_COLOR, w:1.5, dash:[6,4]});
+  series.push({name:'等权5%带宽再平衡', data:windowSeries(bt.bandEqualNav), color:BAND_COLOR, w:1.5, dash:[2,3]});
+  var log = document.getElementById('logChk').checked;
+  chart.setOption({
+    animation:false, legend:{top:0,textStyle:{fontSize:12}},
+    tooltip:{trigger:'axis',valueFormatter:function(v){return v.toFixed(4)}},
+    grid:{top:36,left:12,right:16,bottom:12,containLabel:true},
+    xAxis:{type:'time'},
+    yAxis:{type: log?'log':'value', scale:true, axisLabel:{formatter:function(v){return (+v).toFixed(log?1:2)}}},
+    series: series.map(function(s){
+      return {name:s.name,type:'line',showSymbol:false,data:s.data,lineStyle:{width:s.w,color:s.color,type:s.dash?'dashed':'solid'},
+        itemStyle:{color:s.color},emphasis:{focus:'series'}};
+    })
+  }, true);
+}
+function renderNavLegend(){
+  var rows = [['动量轮动策略',STRAT_COLOR],['等权每日再平衡',EQ_COLOR],['等权5%带宽再平衡',BAND_COLOR]];
+  etfs.forEach(function(e){ rows.push([e.label+' '+e.code, COLORS[e.code]]); });
+  document.getElementById('navLegend').innerHTML = rows.map(function(r){
+    return '<span><i style="background:'+r[1]+'"></i>'+r[0]+'</span>';
+  }).join('');
+}
+
+// ---- 回撤图 ----
+function renderDDChart(){
+  var chart = getChart('ddChart');
+  var data=[], peak=bt.nav[win.i0];
+  for(var i=win.i0;i<=win.i1;i++){
+    if(bt.nav[i]>peak) peak=bt.nav[i];
+    data.push([bt.dates[i], -(1-bt.nav[i]/peak)*100]);
+  }
+  chart.setOption({
+    animation:false, tooltip:{trigger:'axis',valueFormatter:function(v){return (+v).toFixed(2)+'%'}},
+    grid:{top:14,left:12,right:16,bottom:12,containLabel:true},
+    xAxis:{type:'time'},
+    yAxis:{type:'value',axisLabel:{formatter:'{value}%'}},
+    series:[{type:'line',data:data,showSymbol:false,lineStyle:{width:1.2,color:'#e07b39'},
+      areaStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,colorStops:[{offset:0,color:'rgba(224,123,57,0.35)'},{offset:1,color:'rgba(224,123,57,0.04)'}]}},
+      itemStyle:{color:'#e07b39'}}]
+  }, true);
+}
+
+// ---- 持仓时间轴 ----
+function ts(d){ return new Date(d+'T00:00:00+08:00').getTime(); }
+function renderHoldChart(){
+  var chart = getChart('holdChart');
+  var runs=[], cur=null;
+  for(var i=win.i0;i<=win.i1;i++){
+    var h=bt.holding[i];
+    if(cur && cur.k===h){ cur[2]=i; }
+    else { cur=[h,i,i]; runs.push(cur); }
+  }
+  var marks = bt.switches.filter(function(s){
+    return s.date>=bt.dates[win.i0] && s.date<=bt.dates[win.i1];
+  });
+  var runData = runs.map(function(r){ return {value:[r[0], ts(bt.dates[r[1]]), ts(bt.dates[r[2]]), r[2]-r[1]+1]}; });
+  chart.setOption({
+    animation:false,
+    tooltip:{formatter:function(p){
+      if(p.seriesIndex===0){
+        var v=p.value, e=v[0]===-1?{label:'建仓前(空仓)',code:''}:etfs[v[0]];
+        return e.label+' '+e.code+'<br>'+echarts.time.format(v[1],'{yyyy}-{MM}-{dd}')+' ~ '+echarts.time.format(v[2],'{yyyy}-{MM}-{dd}')+'（'+v[3]+' 交易日）';
+      }
+      var s=marks[p.dataIndex]; return '切换：'+(s.from===null?'建仓':etfs[s.from].code+' → ')+etfs[s.to].code+(s.riskOff?'（避险）':'')+'<br>'+s.date;
+    }},
+    grid:{top:8,left:12,right:16,bottom:24,containLabel:true},
+    xAxis:{type:'time', min: ts(bt.dates[win.i0]), max: ts(bt.dates[win.i1])},
+    yAxis:{show:false,min:-0.6,max:1.2},
+    series:[
+      {type:'custom',renderItem:function(params,api){
+        var k=api.value(0), d1=api.value(1), d2=api.value(2);
+        var p1=api.coord([d1,0]), p2=api.coord([d2,0]);
+        var h=(k===-1)?10:16, y=p1[1];
+        return {type:'rect',shape:{x:p1[0],y:y-h/2,width:Math.max(p2[0]-p1[0],1),height:h},
+          style:{fill:k===-1?'#c8cdd4':COLORS[etfs[k].code],opacity:0.92}};
+      },data:runData},
+      {type:'scatter',symbolSize:9,data:marks.map(function(s){return [ts(s.date),0.28]}),
+       itemStyle:{color:'#1c2530'}}
+    ]
+  }, true);
+}
+
+// ---- 年度收益 ----
+function renderYearChart(){
+  var chart = getChart('yearChart');
+  var labels = yearly.map(function(r){return r.year+'年'});
+  var mk=function(name,get,color){ return {name:name,type:'bar',data:yearly.map(function(r){return +(get(r)*100).toFixed(2)}),itemStyle:{color:color},barMaxWidth:14}; };
+  chart.setOption({
+    animation:false, legend:{top:0,textStyle:{fontSize:12}},
+    tooltip:{trigger:'axis',valueFormatter:function(v){return v+'%'}},
+    grid:{top:36,left:12,right:16,bottom:12,containLabel:true},
+    xAxis:{type:'category',data:labels},
+    yAxis:{type:'value',axisLabel:{formatter:'{value}%'}},
+    series:[
+      mk('策略',function(r){return r.strategy},STRAT_COLOR),
+      mk('纳指ETF',function(r){return r.b0},COLORS['513100']),
+      mk('国债ETF',function(r){return r.b1},COLORS['511260']),
+      mk('黄金ETF',function(r){return r.b2},COLORS['518850']),
+      mk('沪深300',function(r){return r.b3},COLORS['510300']),
+      mk('等权每日',function(r){return r.equal},EQ_COLOR),
+      mk('等权5%带宽',function(r){return r.bandEqual},BAND_COLOR)
+    ]
+  }, true);
+}
+
+// ---- 窗口对比表 ----
+function renderCmpTable(){
+  var rows = [{name:'动量轮动策略', arr:bt.nav, hl:true}];
+  etfs.forEach(function(e,k){ rows.push({name:e.label+' '+e.code, arr:bt.benchmarks[k]}); });
+  rows.push({name:'等权每日再平衡', arr:bt.equalNav});
+  rows.push({name:'等权5%带宽再平衡', arr:bt.bandEqualNav});
+  var html = '<tr><th>组合</th><th>总收益率</th><th>年化收益率</th><th>夏普比率</th><th>最大回撤</th><th>卡玛比率</th></tr>';
+  rows.forEach(function(r){
+    var m = RotationEngine.computeMetrics(pseudoBT(r.arr),{rf:rf,i0:win.i0,i1:win.i1});
+    html += '<tr'+(r.hl?' class="hl"':'')+'><td>'+(r.hl?'<span class="tag" style="background:'+STRAT_COLOR+'">策略</span> ':'' )+r.name+'</td>'
+      +'<td class="'+cls(m.total)+'">'+fmtPct(m.total,true)+'</td>'
+      +'<td class="'+cls(m.annualized)+'">'+fmtPct(m.annualized,true)+'</td>'
+      +'<td>'+m.sharpe.toFixed(3)+'</td>'
+      +'<td class="neg">'+fmtPct(-m.maxDD)+'</td>'
+      +'<td>'+(m.calmar===null?'—':m.calmar.toFixed(2))+'</td></tr>';
+  });
+  document.getElementById('cmpTable').innerHTML = html;
+}
+
+// ---- 切换记录 ----
+function renderSwTable(){
+  var d0=bt.dates[win.i0], d1=bt.dates[win.i1];
+  var rows = bt.switches.filter(function(s){return s.date>=d0 && s.date<=d1;});
+  var html = '<tr><th>日期</th><th>切换方向</th>'
+    + etfs.map(function(e){return '<th>'+e.label+'<br>'+e.code+'</th>';}).join('')+'</tr>';
+  rows.slice().reverse().forEach(function(s){
+    var dir = s.from===null
+      ? '<span class="tag" style="background:#8a93a0">建仓</span> → '+etfs[s.to].label
+      : etfs[s.from].label+' <span style="color:'+STRAT_COLOR+'">→</span> '+etfs[s.to].label;
+    if (s.riskOff) dir += ' <span class="tag" style="background:#0f9e8e">避险</span>';
+    html += '<tr><td>'+s.date+'</td><td>'+dir+'</td>'
+      + etfs.map(function(e){
+          var m=s.momenta[e.code];
+          var best = etfs.every(function(e2){ return m>= (s.momenta[e2.code]===null?-Infinity:s.momenta[e2.code]); });
+          return '<td class="'+cls(m)+'"'+(best?' style="font-weight:700"':'')+'>'+(m===null?'—':fmtPct(m,true))+'</td>';
+        }).join('')+'</tr>';
+  });
+  if(!rows.length) html='<tr><td style="text-align:center;color:var(--muted)">该窗口内无调仓事件</td></tr>';
+  document.getElementById('swTable').innerHTML = html;
+}
+
+// ---- 工具 ----
+function getChart(id){
+  var el=document.getElementById(id);
+  var c=echarts.getInstanceByDom(el);
+  if(!c){ c=echarts.init(el); charts.push(c); }
+  return c;
+}
+window.addEventListener('resize',function(){ charts.forEach(function(c){c.resize()}); });
+
+function renderAll(){
+  renderMetrics(); renderNavChart(); renderDDChart(); renderHoldChart();
+  renderCmpTable(); renderSwTable();
+}
+renderNavLegend(); renderYearChart();
+if(!restoreWindowPref()) renderAll();   // 恢复上次所选区间, 恢复失败则展示全部
+})();
+</script>
+</body>
+</html>
