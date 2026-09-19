@@ -1,0 +1,208 @@
+#!/usr/bin/env python3
+"""verify.py — 用 Python 独立实现同一策略, 与 engine.js 的结果交叉验证
+规则: 每周五(休市顺延当周最后交易日)收盘比较过去20个自身交易日涨幅, 全仓切换最大者
+      并列保持原持仓; 信号与成交同用收盘价; 无费用; 夏普无风险利率=2%
+"""
+import json
+import math
+import datetime as dt
+from collections import defaultdict
+
+DIR = "/Users/admin/WorkBuddy/dongliang/etf-rotation-backtest"
+LOOKBACK = 20
+RF = 0.02
+
+
+def load_data():
+    raw = open(f"{DIR}/data.js", encoding="utf-8").read()
+    return json.loads(raw[raw.index("{"):raw.rindex("}") + 1])
+
+
+def monday_of(d):
+    return d - dt.timedelta(days=d.weekday())
+
+
+def run(bt_data):
+    etfs = bt_data["etfs"]
+    K = len(etfs)
+    calendar = sorted({d for e in etfs for d in e["dates"]})
+    n = len(calendar)
+
+    ffill = [[None] * n for _ in range(K)]
+    own_idx = [[-1] * n for _ in range(K)]
+    for k, e in enumerate(etfs):
+        pi = -1
+        for i, dd in enumerate(calendar):
+            while pi + 1 < len(e["dates"]) and e["dates"][pi + 1] <= dd:
+                pi += 1
+            own_idx[k][i] = pi
+            ffill[k][i] = e["closes"][pi] if pi >= 0 else None
+
+    def momentum(i, k):
+        idx = own_idx[k][i]
+        if idx < LOOKBACK:
+            return None
+        return etfs[k]["closes"][idx] / etfs[k]["closes"][idx - LOOKBACK] - 1
+
+    start = next(i for i in range(n)
+                if all(own_idx[k][i] >= LOOKBACK for k in range(K)))
+
+    week_last = {}
+    for i in range(start, n):
+        wk = monday_of(dt.date.fromisoformat(calendar[i]))
+        week_last[wk] = i
+    reb = set(week_last.values())
+
+    first_reb = next(i for i in range(start, n) if i in reb)
+
+    dates, nav, holding, switches = [], [], [], []
+    held, prev = None, 1.0
+    for i in range(first_reb, n):
+        v = 1.0 if held is None else prev * ffill[held][i] / ffill[held][i - 1]
+        if i in reb:
+            best, best_k = -math.inf, -1
+            momenta = {}
+            for k in range(K):
+                m = momentum(i, k)
+                momenta[k] = m
+                if m is not None and m > best:
+                    best, best_k = m, k
+            if best_k >= 0:
+                if held is None:
+                    switches.append({"date": calendar[i], "from": None, "to": best_k, "momenta": momenta})
+                    held = best_k
+                elif best_k != held and best > momenta[held]:
+                    switches.append({"date": calendar[i], "from": held, "to": best_k, "momenta": momenta})
+                    held = best_k
+        dates.append(calendar[i])
+        nav.append(v)
+        holding.append(-1 if held is None else held)
+        prev = v
+
+    benchmarks = [[ffill[k][i] / ffill[k][first_reb] for i in range(first_reb, n)] for k in range(K)]
+    ev, equal_nav = 1.0, []
+    for i in range(first_reb, n):
+        if i > first_reb:
+            ev *= sum(ffill[k][i] / ffill[k][i - 1] for k in range(K)) / K
+        equal_nav.append(ev)
+    # 等权持有(5%带宽再平衡): 期初各25%买入后持有,
+    # 任一ETF权重偏离25%超过5个百分点(权重<20%或>30%)时, 当日收盘再平衡回等权
+    band_units = [0.25 / ffill[k][first_reb] for k in range(K)]
+    band_equal_nav, band_reb_count = [], 0
+    for i in range(first_reb, n):
+        v = sum(band_units[k] * ffill[k][i] for k in range(K))
+        need = any(abs(band_units[k] * ffill[k][i] / v - 0.25) > 0.05 for k in range(K))
+        if need:
+            band_units = [v / (K * ffill[k][i]) for k in range(K)]
+            band_reb_count += 1
+        band_equal_nav.append(v)
+
+    # 指标
+    rs = [nav[i] / nav[i - 1] - 1 for i in range(1, len(nav))]
+    m = sum(rs) / len(rs)
+    sd = math.sqrt(sum((x - m) ** 2 for x in rs) / (len(rs) - 1))
+    peak, max_dd = nav[0], 0.0
+    for v2 in nav:
+        peak = max(peak, v2)
+        max_dd = max(max_dd, 1 - v2 / peak)
+    cur_dd = 1 - nav[-1] / max(nav)
+    total = nav[-1] / nav[0] - 1
+    annualized = (nav[-1] / nav[0]) ** (252 / (len(nav) - 1)) - 1
+    sharpe = (m - RF / 252) / sd * math.sqrt(252)
+
+    week_end = {}
+    for i in range(len(nav)):
+        wk = monday_of(dt.date.fromisoformat(dates[i]))
+        week_end[wk] = i
+    idxs = [week_end[w] for w in sorted(week_end)]
+    wins, prev_ref = 0, nav[0]
+    for li in idxs:
+        if li > 0:
+            if nav[li] / prev_ref - 1 > 0:
+                wins += 1
+            prev_ref = nav[li]
+    weeks = len([li for li in idxs if li > 0])
+
+    return {
+        "firstDate": dates[0], "lastDate": dates[-1], "nDays": len(dates),
+        "nav": nav, "holding": holding, "equalNav": equal_nav,
+        "bandEqualNav": band_equal_nav, "bandRebCount": band_reb_count,
+        "benchmarks": benchmarks,
+        "switches": [{"date": s["date"], "from": s["from"], "to": s["to"]} for s in switches],
+        "metrics": {
+            "total": total, "annualized": annualized, "vol": sd * math.sqrt(252),
+            "sharpe": sharpe, "maxDD": max_dd, "currentDD": cur_dd,
+            "weeklyWinRate": wins / weeks if weeks else 0,
+            "switches": len(switches) - 1,  # 不含建仓
+        },
+    }
+
+
+def main():
+    data = load_data()
+    py = run(data)
+    js = json.load(open(f"{DIR}/engine_result.json", encoding="utf-8"))
+
+    ok = True
+
+    def cmp(name, a, b, tol=1e-9):
+        nonlocal ok
+        good = abs(a - b) <= tol
+        ok = ok and good
+        print(f"  {'PASS' if good else 'FAIL'}  {name}: py={a!r} js={b!r}")
+
+    print("== 基本信息 ==")
+    for k in ("firstDate", "lastDate", "nDays"):
+        good = py[k] == js[k]
+        ok = ok and good
+        print(f"  {'PASS' if good else 'FAIL'}  {k}: py={py[k]} js={js[k]}")
+
+    print("== 净值序列 ==")
+    if len(py["nav"]) != len(js["nav"]):
+        ok = False
+        print(f"  FAIL  长度不一致 py={len(py['nav'])} js={len(js['nav'])}")
+    else:
+        diff = max(abs(a - b) for a, b in zip(py["nav"], js["nav"]))
+        cmp("净值最大绝对偏差", diff, 0, 1e-10)
+        diff_eq = max(abs(a - b) for a, b in zip(py["equalNav"], js["equalNav"]))
+        cmp("等权净值最大绝对偏差", diff_eq, 0, 1e-10)
+        diff_he = max(abs(a - b) for a, b in zip(py["bandEqualNav"], js["bandEqualNav"]))
+        cmp("等权5%带宽再平衡净值最大绝对偏差", diff_he, 0, 1e-10)
+        cmp("等权5%带宽再平衡次数", py["bandRebCount"], js["bandRebCount"], tol=0.5)
+        for k in range(len(py["benchmarks"])):
+            db = max(abs(a - b) for a, b in zip(py["benchmarks"][k], js["benchmarks"][k]))
+            cmp(f"基准{data['etfs'][k]['code']}净值最大偏差", db, 0, 1e-10)
+        mism = [i for i, (a, b) in enumerate(zip(py["holding"], js["holding"])) if a != b]
+        print(f"  {'PASS' if not mism else 'FAIL'}  持仓序列一致 ({len(mism)}处不一致)")
+
+    print("== 调仓记录 ==")
+    py_sw = py["switches"]
+    js_sw = js["switches"]
+    good = len(py_sw) == len(js_sw) and all(
+        a["date"] == b["date"] and a["from"] == b["from"] and a["to"] == b["to"]
+        for a, b in zip(py_sw, js_sw))
+    ok = ok and good
+    print(f"  {'PASS' if good else 'FAIL'}  调仓记录完全一致 (共{len(py_sw)}条, py {len(js_sw)}条)")
+    if not good:
+        for a, b in list(zip(py_sw, js_sw))[:10]:
+            if a != b:
+                print("    py:", a, " js:", b)
+
+    print("== 指标 ==")
+    for k in ("total", "annualized", "vol", "sharpe", "maxDD", "currentDD", "weeklyWinRate", "switches"):
+        cmp(k, py["metrics"][k], js["metrics"][k], tol=1e-9)
+
+    print()
+    print("总体结论:", "ALL PASS ✓ 双实现一致" if ok else "存在差异, 需排查 ✗")
+    print(f"\n策略概要(Python独立实现): 回测区间 {py['firstDate']} ~ {py['lastDate']}, {py['nDays']}个交易日")
+    print(f"  总收益率: {py['metrics']['total']*100:.2f}%")
+    print(f"  年化收益率: {py['metrics']['annualized']*100:.2f}%")
+    print(f"  夏普比率(rf=2%): {py['metrics']['sharpe']:.3f}")
+    print(f"  最大回撤: {py['metrics']['maxDD']*100:.2f}%")
+    print(f"  当前回撤: {py['metrics']['currentDD']*100:.2f}%")
+    print(f"  切换次数: {py['metrics']['switches']}")
+    raise SystemExit(0 if ok else 1)
+
+
+if __name__ == "__main__":
+    main()
