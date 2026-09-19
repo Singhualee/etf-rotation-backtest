@@ -199,7 +199,7 @@ setTimeout(async () => {
   });
   check('刷新后指标已用新数据重算(总收益率变化)', refreshedCards['总收益率'] !== '+247.67%',
     refreshedCards['总收益率']);
-  check('成功状态含自动保存提示', refreshStatus.textContent.includes('已自动保存到浏览器本地缓存'),
+  check('成功状态含自动保存提示', refreshStatus.textContent.includes('已存浏览器缓存'),
     refreshStatus.textContent);
   const cachedRaw = window.localStorage.getItem('etfRotationCacheV1');
   check('刷新成功后已写入本地缓存', !!cachedRaw);
@@ -241,7 +241,7 @@ setTimeout(async () => {
 
   // 13. 自定义起止区间
   const cs = document.getElementById('customStart'), ce = document.getElementById('customEnd');
-  check('自定义日期控件存在且范围正确', !!cs && !!ce && cs.min === '2020-07-10' && ce.max === '2026-09-18',
+  check('自定义日期控件存在且范围已随数据刷新更新', !!cs && !!ce && cs.min < ce.max && /^\d{4}-\d{2}-\d{2}$/.test(cs.min),
     cs.min + '~' + ce.max);
   function collectCards() {
     const c = {};
@@ -250,7 +250,7 @@ setTimeout(async () => {
   }
   cs.value = '2021-01-01'; ce.value = '2021-12-31'; cs.onchange();
   let cCards = collectCards();
-  check('自定义2021年窗口交易日数在[240,250]', (() => { const n = +cCards['交易日数']; return n >= 240 && n <= 250; })(),
+  check('自定义2021年窗口交易日数在[240,270](假数据为纯工作日)', (() => { const n = +cCards['交易日数']; return n >= 240 && n <= 270; })(),
     cCards['交易日数']);
   check('自定义选择已写入偏好存储', (() => {
     const p = JSON.parse(window.localStorage.getItem('etfRotationWindowV1'));

@@ -71,6 +71,10 @@ tr.hl td{font-weight:700}
     <button class="seg active" id="btnAll">全部区间</button>
     <select id="yearSel"><option value="">按年查看…</option></select>
     <select id="qSel"><option value="">按季度查看…</option></select>
+    <span style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)">自定义
+      <input type="date" id="customStart" title="自定义开始日期"> ~
+      <input type="date" id="customEnd" title="自定义结束日期">
+    </span>
     <label class="rf">无风险利率 <input type="range" id="rfSlider" min="0" max="5" step="0.25" value="2"><b id="rfLabel">2%</b></label>
     <label class="rf"><input type="checkbox" id="logChk">对数坐标</label>
   </div>
@@ -125,6 +129,7 @@ tr.hl td{font-weight:700}
 (function(){
 'use strict';
 var COLORS = {'513100':'#2f6fed','511260':'#0f9e8e','518850':'#d99a1f','510300':'#7a5af5'};
+var APP_VER = 'v1.5';   // 网页版本号, 显示在副标题便于分辨新旧副本
 var EQ_COLOR = '#8a93a0', BAND_COLOR = '#b06a3b', STRAT_COLOR = '#d93831';
 var etfs = ETF_DATA.etfs;
 var CACHE_KEY = 'etfRotationCacheV1';
@@ -162,7 +167,8 @@ function dataEndDate(){
 function updateSubtitle(){
   document.getElementById('subtitle').textContent =
     '回测区间 ' + bt.dates[0] + ' ~ ' + bt.dates[bt.dates.length-1] +
-    '（' + bt.dates.length + ' 个交易日）· 调仓 ' + bt.rebCount + ' 次（含建仓）· 数据截至 ' + dataEndDate();
+    '（' + bt.dates.length + ' 个交易日）· 调仓 ' + bt.rebCount + ' 次（含建仓）· 数据截至 ' + dataEndDate() +
+    ' · 网页版本 ' + APP_VER;
 }
 updateSubtitle();
 document.getElementById('dataNote').textContent = ETF_DATA.meta.source + '，抓取于 ' + ETF_DATA.meta.fetchedAt;
@@ -389,7 +395,8 @@ document.getElementById('btnRefresh').onclick = async function(){
       bt = RotationEngine.runBacktest(etfs, {lookback:20});
       yearly = RotationEngine.yearlyReturns(bt);
       document.getElementById('dataNote').textContent = ETF_DATA.meta.source + '，抓取于 ' + todayStr();
-      setWindow(0, bt.nav.length-1);
+      setCustomBounds();
+      if(!restoreWindowPref()){ win={i0:0,i1:bt.nav.length-1}; markActive('all'); renderAll(); }
       renderYearChart(); renderNavLegend();
       updateSubtitle();
       var saved = saveCache();

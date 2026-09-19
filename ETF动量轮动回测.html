@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- 单文件构建版, 由 build.py 生成于 2026-09-19 13:44 -->
+<!-- 单文件构建版, 由 build.py 生成于 2026-09-19 14:06 -->
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -339,7 +339,7 @@ h1{font-size:22px;font-weight:700}
 .card h2{font-size:15px;font-weight:600;margin-bottom:12px}
 .card h2 .hint{font-weight:400;color:var(--muted);font-size:12px;margin-left:8px}
 .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:14px}
-select,button.seg{font-size:13px;padding:6px 12px;border:1px solid var(--border);border-radius:8px;
+select,input[type=date],button.seg{font-size:13px;padding:6px 12px;border:1px solid var(--border);border-radius:8px;
   background:var(--card);color:var(--text);cursor:pointer}
 button.seg.active{background:var(--accent);border-color:var(--accent);color:#fff}
 label.rf{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:8px}
@@ -387,6 +387,10 @@ tr.hl td{font-weight:700}
     <button class="seg active" id="btnAll">全部区间</button>
     <select id="yearSel"><option value="">按年查看…</option></select>
     <select id="qSel"><option value="">按季度查看…</option></select>
+    <span style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)">自定义
+      <input type="date" id="customStart" title="自定义开始日期"> ~
+      <input type="date" id="customEnd" title="自定义结束日期">
+    </span>
     <label class="rf">无风险利率 <input type="range" id="rfSlider" min="0" max="5" step="0.25" value="2"><b id="rfLabel">2%</b></label>
     <label class="rf"><input type="checkbox" id="logChk">对数坐标</label>
   </div>
@@ -441,6 +445,7 @@ tr.hl td{font-weight:700}
 (function(){
 'use strict';
 var COLORS = {'513100':'#2f6fed','511260':'#0f9e8e','518850':'#d99a1f','510300':'#7a5af5'};
+var APP_VER = 'v1.5';   // 网页版本号, 显示在副标题便于分辨新旧副本
 var EQ_COLOR = '#8a93a0', BAND_COLOR = '#b06a3b', STRAT_COLOR = '#d93831';
 var etfs = ETF_DATA.etfs;
 var CACHE_KEY = 'etfRotationCacheV1';
@@ -478,7 +483,8 @@ function dataEndDate(){
 function updateSubtitle(){
   document.getElementById('subtitle').textContent =
     '回测区间 ' + bt.dates[0] + ' ~ ' + bt.dates[bt.dates.length-1] +
-    '（' + bt.dates.length + ' 个交易日）· 调仓 ' + bt.rebCount + ' 次（含建仓）· 数据截至 ' + dataEndDate();
+    '（' + bt.dates.length + ' 个交易日）· 调仓 ' + bt.rebCount + ' 次（含建仓）· 数据截至 ' + dataEndDate() +
+    ' · 网页版本 ' + APP_VER;
 }
 updateSubtitle();
 document.getElementById('dataNote').textContent = ETF_DATA.meta.source + '，抓取于 ' + ETF_DATA.meta.fetchedAt;
@@ -705,7 +711,8 @@ document.getElementById('btnRefresh').onclick = async function(){
       bt = RotationEngine.runBacktest(etfs, {lookback:20});
       yearly = RotationEngine.yearlyReturns(bt);
       document.getElementById('dataNote').textContent = ETF_DATA.meta.source + '，抓取于 ' + todayStr();
-      setWindow(0, bt.nav.length-1);
+      setCustomBounds();
+      if(!restoreWindowPref()){ win={i0:0,i1:bt.nav.length-1}; markActive('all'); renderAll(); }
       renderYearChart(); renderNavLegend();
       updateSubtitle();
       var saved = saveCache();
@@ -744,36 +751,74 @@ quarters.forEach(function(q){
   o.textContent = q.slice(0,4)+' 年第 '+q.slice(5)+' 季度'; qSel.appendChild(o);
 });
 
-function setWindow(i0,i1,btn){
-  win = {i0:i0, i1:i1};
-  document.querySelectorAll('button.seg,select').forEach(function(e){e.classList.remove('active')});
-  yearSel.value=''; qSel.value='';
-  if (btn==='year') yearSel.classList.add('active');
-  else if (btn==='quarter') qSel.classList.add('active');
-  else document.getElementById('btnAll').classList.add('active');
-  renderAll();
-}
-document.getElementById('btnAll').onclick = function(){ setWindow(0, bt.nav.length-1); };
-yearSel.onchange = function(){
-  if (!yearSel.value) return;
-  var y = yearSel.value.slice(1);
-  var i0 = lowerBound(y+'-01-01'), i1 = upperBound(y+'-12-31');
-  if (i0>i1) return;
-  setWindow(i0,i1,'year');
-};
-qSel.onchange = function(){
-  if (!qSel.value) return;
-  var q = qSel.value.slice(1);
-  var y = q.slice(0,4), m = (+q.slice(5)-1)*3+1;
-  var endM = m+2;
-  var lastDay = new Date(+y, endM, 0).getDate();
-  var i0 = lowerBound(y+'-'+pad(m)+'-01'), i1 = upperBound(y+'-'+pad(endM)+'-'+pad(lastDay));
-  if (i0>i1) return;
-  setWindow(i0,i1,'quarter');
-};
 function pad(x){return (x<10?'0':'')+x}
 function lowerBound(d){ var i=0; while(i<bt.dates.length && bt.dates[i]<d) i++; return i; }
 function upperBound(d){ var i=bt.dates.length-1; while(i>=0 && bt.dates[i]>d) i--; return i; }
+
+// ---- 时间区间选择: 全部 / 按年 / 按季度 / 自定义起止(自动记住上次选择) ----
+var customStart=document.getElementById('customStart'), customEnd=document.getElementById('customEnd');
+var PREF_KEY='etfRotationWindowV1';
+function setCustomBounds(){
+  var mn=bt.dates[0], mx=dataEndDate();
+  customStart.min=customEnd.min=mn; customStart.max=customEnd.max=mx;
+}
+setCustomBounds();
+function loadPref(){ try{ return JSON.parse(localStorage.getItem(PREF_KEY)); }catch(e){ return null; } }
+function savePref(sel){ try{ localStorage.setItem(PREF_KEY, JSON.stringify(sel)); }catch(e){} }
+function markActive(type, sel){
+  document.querySelectorAll('.controls button.seg, .controls select').forEach(function(e){e.classList.remove('active')});
+  yearSel.value = (type==='year' && sel) ? 'y'+sel.y : '';
+  qSel.value = (type==='quarter' && sel) ? 'q'+sel.q : '';
+  if(type==='year') yearSel.classList.add('active');
+  else if(type==='quarter') qSel.classList.add('active');
+  else if(type==='all') document.getElementById('btnAll').classList.add('active');
+}
+// 统一入口: sel={type:'all'|'year'|'quarter'|'custom', ...}; 返回是否成功应用
+// 自定义日期自动收敛到数据范围内, 起止倒置自动交换
+function applySelection(sel){
+  var type=(sel && sel.type) || 'all', i0=0, i1=bt.nav.length-1;
+  if(type==='year' && sel.y){
+    i0=lowerBound(sel.y+'-01-01'); i1=upperBound(sel.y+'-12-31');
+  } else if(type==='quarter' && sel.q){
+    var y=sel.q.slice(0,4), m=(+sel.q.slice(5)-1)*3+1;
+    i0=lowerBound(y+'-'+pad(m)+'-01');
+    i1=upperBound(y+'-'+pad(m+2)+'-'+pad(new Date(+y, m+2, 0).getDate()));
+  } else if(type==='custom' && sel.s && sel.e){
+    var s=sel.s<bt.dates[0]?bt.dates[0]:sel.s;
+    var e2=sel.e>dataEndDate()?dataEndDate():sel.e;
+    if(s>e2){ var t=s; s=e2; e2=t; }
+    i0=lowerBound(s); i1=upperBound(e2);
+    customStart.value=s; customEnd.value=e2;
+  } else type='all';
+  if(i0>i1) return false;
+  win={i0:i0, i1:i1};
+  markActive(type, sel);
+  savePref(type==='all' ? {type:'all'} : sel);
+  renderAll();
+  return true;
+}
+document.getElementById('btnAll').onclick = function(){ applySelection({type:'all'}); };
+yearSel.onchange = function(){
+  if(!yearSel.value) return;
+  applySelection({type:'year', y:yearSel.value.slice(1)});
+};
+qSel.onchange = function(){
+  if(!qSel.value) return;
+  applySelection({type:'quarter', q:qSel.value.slice(1)});
+};
+function applyCustom(){
+  if(!customStart.value || !customEnd.value) return;
+  if(!applySelection({type:'custom', s:customStart.value, e:customEnd.value})){
+    customStart.value=bt.dates[win.i0]; customEnd.value=bt.dates[win.i1];
+  }
+}
+customStart.onchange = applyCustom;
+customEnd.onchange = applyCustom;
+// 下次打开自动恢复上次所选区间
+function restoreWindowPref(){
+  var p = loadPref();
+  return !!(p && applySelection(p));
+}
 
 // ---- 无风险利率 ----
 var rfSlider = document.getElementById('rfSlider');
@@ -979,7 +1024,8 @@ function renderAll(){
   renderMetrics(); renderNavChart(); renderDDChart(); renderHoldChart();
   renderCmpTable(); renderSwTable();
 }
-renderNavLegend(); renderYearChart(); renderAll();
+renderNavLegend(); renderYearChart();
+if(!restoreWindowPref()) renderAll();   // 恢复上次所选区间, 恢复失败则展示全部
 })();
 </script>
 </body>
