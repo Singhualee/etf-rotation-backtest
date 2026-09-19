@@ -63,7 +63,7 @@ setTimeout(async () => {
   check('季度筛选已填充(>20项)', qN > 20, qN);
   check('窗口对比表8行(表头+7组合)', document.querySelectorAll('#cmpTable tr').length === 8,
     document.querySelectorAll('#cmpTable tr').length);
-  check('切换记录表104行(表头+103事件)', document.querySelectorAll('#swTable tr').length === 104,
+  check('切换记录表99行(表头+98事件,含建仓)', document.querySelectorAll('#swTable tr').length === 99,
     document.querySelectorAll('#swTable tr').length);
 
   // 4. 全区间核心指标与交叉验证基线一致
@@ -71,11 +71,11 @@ setTimeout(async () => {
   document.querySelectorAll('#metricCards .metric').forEach(m => {
     cards[m.querySelector('.k').textContent] = m.querySelector('.v').textContent;
   });
-  check('总收益率=+247.67%', cards['总收益率'] === '+247.67%', cards['总收益率']);
-  check('年化收益率=+23.22%', cards['年化收益率'] === '+23.22%', cards['年化收益率']);
-  check('夏普比率=0.975(rf=2%)', cards['夏普比率'] === '0.975', cards['夏普比率']);
-  check('最大回撤=-18.68%', cards['最大回撤'] === '-18.68%', cards['最大回撤']);
-  check('切换次数=102', cards['切换次数'] === '102', cards['切换次数']);
+  check('总收益率=+270.04%', cards['总收益率'] === '+270.04%', cards['总收益率']);
+  check('年化收益率=+24.51%', cards['年化收益率'] === '+24.51%', cards['年化收益率']);
+  check('夏普比率=1.036(rf=2%)', cards['夏普比率'] === '1.036', cards['夏普比率']);
+  check('最大回撤=-18.46%', cards['最大回撤'] === '-18.46%', cards['最大回撤']);
+  check('切换次数=97', cards['切换次数'] === '97', cards['切换次数']);
 
   // 5. 交互: 按年筛选 → 指标重算
   const yearSel = document.getElementById('yearSel');
@@ -139,10 +139,10 @@ setTimeout(async () => {
   document.querySelectorAll('#metricCards .metric').forEach(m => {
     back[m.querySelector('.k').textContent] = m.querySelector('.v').textContent;
   });
-  check('回到全部区间后总收益率恢复+247.67%', back['总收益率'] === '+247.67%', back['总收益率']);
-  check('回到全部区间后夏普恢复rf=0口径0.992附近', (() => {
-    // rf=0时全区间夏普 = (m/sd)*sqrt(252); 与rf=2%差 0.02/vol*sqrt? 用数值关系校验: > rf=2%的0.975
-    return parseFloat(back['夏普比率']) > 0.975;
+  check('回到全部区间后总收益率恢复+270.04%', back['总收益率'] === '+270.04%', back['总收益率']);
+  check('回到全部区间后夏普恢复rf=0口径(高于rf=2%口径)', (() => {
+    // rf=0时全区间夏普 = (m/sd)*sqrt(252); 用数值关系校验: > rf=2%的1.036
+    return parseFloat(back['夏普比率']) > 1.036;
   })(), back['夏普比率']);
 
   // 10. 边界: 年度收益表 + 图例渲染
@@ -171,11 +171,12 @@ setTimeout(async () => {
     fakeSeries[sym] = fakeDates.map((d, i) => [d, '1', String(1 + i * 0.001), '1', '1', '1000']);
   });
   window.__wbJsonpImpl = (url) => new Promise((resolve, reject) => {
-    const m = url.match(/param=(sh\d+),day,,([^,]*),(\d+),qfq/);
+    const m = url.match(/param=(sh\d+),day,,([^,]*),(\d+),(qfq)?$/);
     if (!m) { reject(new Error('URL格式不符: ' + url)); return; }
-    const sym = m[1], end = m[2], count = +m[3];
+    const sym = m[1], end = m[2], count = +m[3], fq = m[4] || '';
     const rows = fakeSeries[sym].filter(r => r[0] <= end).slice(-count);
-    setTimeout(() => resolve({ data: { [sym]: { qfqday: rows } } }), 2);
+    // fq='' → 不复权(day), fq='qfq' → 前复权(qfqday); 假数据无分红, 两者一致
+    setTimeout(() => resolve({ data: { [sym]: fq ? { qfqday: rows } : { day: rows } } }), 2);
   });
   let refreshErr = null;
   try {
@@ -197,16 +198,21 @@ setTimeout(async () => {
   document.querySelectorAll('#metricCards .metric').forEach(m => {
     refreshedCards[m.querySelector('.k').textContent] = m.querySelector('.v').textContent;
   });
-  check('刷新后指标已用新数据重算(总收益率变化)', refreshedCards['总收益率'] !== '+247.67%',
+  check('刷新后指标已用新数据重算(总收益率变化)', refreshedCards['总收益率'] !== '+270.04%',
     refreshedCards['总收益率']);
   check('成功状态含自动保存提示', refreshStatus.textContent.includes('已存浏览器缓存'),
     refreshStatus.textContent);
-  const cachedRaw = window.localStorage.getItem('etfRotationCacheV1');
+  const cachedRaw = window.localStorage.getItem('etfRotationCacheV2');
   check('刷新成功后已写入本地缓存', !!cachedRaw);
   check('缓存endDate与savedAt正确', (() => {
     if (!cachedRaw) return false;
     const c = JSON.parse(cachedRaw);
     return c.endDate === '2026-09-18' && c.savedAt && c.etfs.length === 4 && c.etfs[0].dates.length > 3000;
+  })());
+  check('缓存含分红表(510300/511260)', (() => {
+    if (!cachedRaw) return false;
+    const c = JSON.parse(cachedRaw);
+    return c.dividends && c.dividends['510300'].length >= 6 && c.dividends['511260'].length >= 5;
   })());
 
   // 11b. 二次打开: 启动时自动加载比内嵌数据新的缓存
@@ -217,7 +223,7 @@ setTimeout(async () => {
       const ctx2 = new Proxy({}, { get(t,p){ if(p==='measureText')return()=>({width:10}); if(p==='canvas')return{width:300,height:150}; if(p==='createLinearGradient'||p==='createRadialGradient')return()=>({addColorStop:noop2}); if(typeof p==='string')return noop2; }, set(){return true;} });
       w2.HTMLCanvasElement.prototype.getContext = function(){ return ctx2; };
       w2.ResizeObserver = class { observe(){} unobserve(){} disconnect(){} };
-      w2.localStorage.setItem('etfRotationCacheV1', cachedRaw);
+      w2.localStorage.setItem('etfRotationCacheV2', cachedRaw);
     },
   });
   let d2ok = false, d2sub = '', d2status = '';
@@ -306,7 +312,7 @@ setTimeout(async () => {
   check('偏好数据损坏时兜底为全部区间', (() => {
     const c5 = {};
     dom5.window.document.querySelectorAll('#metricCards .metric').forEach(m => { c5[m.querySelector('.k').textContent] = m.querySelector('.v').textContent; });
-    return c5['总收益率'] === '+247.67%';
+    return c5['总收益率'] === '+270.04%';
   })());
 
   console.log('\n结果: ' + pass + ' PASS, ' + fail + ' FAIL');

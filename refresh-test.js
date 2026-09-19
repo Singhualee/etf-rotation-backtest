@@ -82,11 +82,18 @@ setTimeout(async () => {
   });
   check('指标卡已重算且总收益为正数格式', /\+/.test(cards['总收益率']), cards['总收益率']);
   check('窗口对比表仍为8行', document.querySelectorAll('#cmpTable tr').length === 8);
-  check('切换记录表仍与副标题调仓数一致', document.querySelectorAll('#swTable tr').length > 100);
+  check('切换记录表行数与副标题调仓数一致', document.querySelectorAll('#swTable tr').length >= 90);
   check('状态提示已存浏览器缓存', st.textContent.includes('已存浏览器缓存'), st.textContent);
-  const cached = JSON.parse(window.localStorage.getItem('etfRotationCacheV1') || 'null');
+  const cached = JSON.parse(window.localStorage.getItem('etfRotationCacheV2') || 'null');
   check('本地缓存已写入且endDate与副标题一致', !!cached && cached.endDate === m[1],
     cached && cached.endDate);
+  check('本地缓存含分红表且写回HTML包含分红表', (() => {
+    if (!cached || !cached.dividends) return false;
+    const html = window.__lastSavedHtml || '';
+    return cached.dividends['510300'].length >= 6 &&
+           cached.dividends['511260'].length >= 5 &&
+           html.indexOf('"dividends"') >= 0;
+  })());
 
   console.log('\n结果: ' + pass + ' PASS, ' + fail + ' FAIL');
   process.exit(fail ? 1 : 0);
