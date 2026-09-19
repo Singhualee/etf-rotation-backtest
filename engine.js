@@ -11,6 +11,12 @@
     return d.toISOString().slice(0, 10);
   }
 
+  // 0=周一 ... 4=周五 (ISO weekday - 1)
+  function weekdayOf(dateStr) {
+    var d = new Date(dateStr + 'T00:00:00Z');
+    return (d.getUTCDay() + 6) % 7;
+  }
+
   function runBacktest(etfs, options) {
     options = options || {};
     var lookback = options.lookback || 20;
@@ -58,14 +64,31 @@
     }
     if (startIdx < 0) throw new Error('数据不足以计算动量');
 
-    // 5. 调仓日: 每个自然周(周一起)在日历上的最后一个交易日, 且 >= 起点
+    // 5. 调仓日: 每个自然周(周一起)调仓一次, 且只在 >= 起点的日期上
+    //    rebalanceWeekday: 0=周一 ... 4=周五(默认)
+    //    规则: 取当周首个 weekday >= X 的交易日(休市顺延);
+    //          若当周 X 之后已无交易日, 提前至当周最后一个交易日(保证每周恰好调仓一次)
+    //    注: X=4(周五) 时等价于旧规则"当周最后一个交易日", 与已验证基线完全一致
+    var wd = options.rebalanceWeekday === undefined ? 4 : options.rebalanceWeekday;
+    if (wd < 0 || wd > 4) throw new Error('rebalanceWeekday 必须在 0(周一)~4(周五) 之间');
     var rebSet = {};
-    var weekLast = {};
-    for (var i3 = 0; i3 < n; i3++) {
-      var wk = mondayOf(calendar[i3]);
-      if (calendar[i3] >= calendar[startIdx]) weekLast[wk] = i3;
+    var curWk = null, wkDays = [];
+    function flushWeek() {
+      if (curWk === null) return;
+      var pick = -1;
+      for (var j = 0; j < wkDays.length; j++) {
+        if (weekdayOf(calendar[wkDays[j]]) >= wd) { pick = wkDays[j]; break; }
+      }
+      if (pick < 0) pick = wkDays[wkDays.length - 1];
+      rebSet[pick] = true;
     }
-    Object.keys(weekLast).forEach(function (wk) { rebSet[weekLast[wk]] = true; });
+    for (var i3 = 0; i3 < n; i3++) {
+      if (calendar[i3] < calendar[startIdx]) continue;
+      var wk = mondayOf(calendar[i3]);
+      if (wk !== curWk) { flushWeek(); curWk = wk; wkDays = []; }
+      wkDays.push(i3);
+    }
+    flushWeek();
 
     // 6. 找到首个调仓日(回测从该日开始, 净值起点=1)
     var firstRebIdx = -1;
@@ -74,13 +97,24 @@
     }
     if (firstRebIdx < 0) throw new Error('未找到调仓日');
 
+    // 6.5 可选: 交易成本(每次实际切换持仓扣减净值) 与 绝对动量避险
+    var costRate = options.costRate || 0;
+    var riskOff = options.riskOff || null;
+    var bondK = -1;
+    if (riskOff) {
+      for (var kb = 0; kb < K; kb++) {
+        if (etfs[kb].code === riskOff.bondCode) { bondK = kb; break; }
+      }
+      if (bondK < 0) throw new Error('riskOff.bondCode 不在标的列表中: ' + riskOff.bondCode);
+    }
+
     // 7. 逐日模拟
     var dates = [], nav = [], holding = [], switches = [];
     var held = null, prevNav = 1;
     for (var i5 = firstRebIdx; i5 < n; i5++) {
       var d5 = calendar[i5];
       if (held === null) {
-        var v = 1; // 首日建仓, 净值=1
+        var v = 1; // 首日建仓, 净值=1 (建仓不计成本)
       } else {
         v = prevNav * ffill[held][i5] / ffill[held][i5 - 1];
       }
@@ -92,14 +126,20 @@
           if (m !== null && m > best) { best = m; bestK = k5; }
         }
         if (bestK >= 0) {
+          // 绝对动量避险: 最强动量跌破阈值时, 改持避险债券ETF
+          var chosen = bestK;
+          var isRiskOff = false;
+          if (riskOff && best < riskOff.floor) { chosen = bondK; isRiskOff = chosen !== bestK; }
+          var chosenM = momenta[etfs[chosen].code];
           if (held === null) {
-            switches.push({ date: d5, from: null, to: bestK, momenta: momenta });
-            held = bestK;
-          } else if (bestK !== held && best > momenta[etfs[held].code]) {
-            switches.push({ date: d5, from: held, to: bestK, momenta: momenta });
-            held = bestK;
+            switches.push({ date: d5, from: null, to: chosen, momenta: momenta, riskOff: isRiskOff });
+            held = chosen;
+          } else if (chosen !== held && chosenM > momenta[etfs[held].code]) {
+            switches.push({ date: d5, from: held, to: chosen, momenta: momenta, riskOff: isRiskOff });
+            held = chosen;
+            if (costRate > 0) v *= (1 - costRate); // 切换持仓: 扣减交易成本
           }
-          // 并列(最大值不严格大于当前持仓)时保持原持仓
+          // 并列(动量不严格大于当前持仓)时保持原持仓, 不产生交易与成本
         }
       }
       dates.push(d5);
@@ -258,5 +298,6 @@
     computeMetrics: computeMetrics,
     yearlyReturns: yearlyReturns,
     mondayOf: mondayOf,
+    weekdayOf: weekdayOf,
   };
 })(typeof window !== 'undefined' ? window : globalThis);
