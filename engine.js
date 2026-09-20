@@ -114,8 +114,9 @@
     if (volTarget > 0 && bondK < 0) throw new Error('volTarget 需要 riskOff.bondCode 指定避险债券ETF');
     function realizedVol(i, k) {
       var rs = [], m = 0, j;
+      if (i - volLB < 0) return null; // 历史不足 volLB 个日历交易日(需访问 j-1 >= 0)
       for (j = i - volLB + 1; j <= i; j++) {
-        if (ffill[k][j - 1] === null || ffill[k][j] === null) return null;
+        if (ffill[k][j - 1] == null || ffill[k][j] == null) return null; // == null 同时挡住 null 与越界 undefined
         rs.push(ffill[k][j] / ffill[k][j - 1] - 1);
       }
       if (rs.length < volLB) return null;
@@ -170,7 +171,8 @@
             }
             var tv8 = 0, hadW = w !== null;
             for (var k9 = 0; k9 < K; k9++) tv8 += Math.abs(tw[k9] - (hadW ? w[k9] : 0));
-            pendingCost = hadW ? costRate * tv8 : 0; // 建仓不计成本
+            // 换手按单边计: Σ|Δw|/2. 全仓切换 Σ|Δw|=2 → 与基础路径每次切换扣 costRate 完全一致
+            pendingCost = hadW ? costRate * tv8 / 2 : 0; // 建仓不计成本
             wNew = tw;
           }
         }

@@ -690,7 +690,7 @@ function updateStrategyNote(){
   document.getElementById('stratNote').innerHTML =
     '策略：每<b>'+wd+'</b>（休市则顺延至当周下一交易日；若当周已无则提前至当周最后交易日，每周恰好调仓一次）收盘比较四只 ETF 过去 <b>'+
     document.getElementById('lbSel').value+'</b> 个交易日涨幅，持有最强者；并列时保持原持仓；数据不足者不参与比较。'+
-    '避险规则<b>'+(ro?'开启':'关闭')+'</b>'+(ro?'：最强动量 &lt; 0 时，全仓转入 511260 十年国债ETF。':'。')+
+    '避险规则<b>'+(ro?'开启':'关闭')+'</b>'+(ro?(vol>0?'（波动率目标开启时固定开启，国债同时作为仓位补足资产）：':'：')+'最强动量 &lt; 0 时，全仓转入 511260 十年国债ETF。':'。')+
     (vol>0
       ?'波动率目标<b>'+ (vol*100) +'%</b>开启：每个调仓日按持有 ETF 过去 20 个交易日实际波动率定仓——风险腿仓位 = min(100%, 目标波动率÷实际波动率)，余额持有 511260 国债ETF（实际波动率低于目标时满仓，不加杠杆）。'
       :'波动率目标<b>关闭</b>：全仓持有单一 ETF。')+
@@ -698,7 +698,17 @@ function updateStrategyNote(){
 }
 ['wdSel','lbSel','riskOffChk','costSel','volSel'].forEach(function(id){
   document.getElementById(id).onchange = function(){
-    bt = RotationEngine.runBacktest(etfs, stratOpts());
+    // 波动率目标需要避险债券作为仓位补足资产: 开启波动率目标时强制开启避险并锁定复选框
+    var volOn = +document.getElementById('volSel').value > 0;
+    var roChk = document.getElementById('riskOffChk');
+    if (volOn) { roChk.checked = true; roChk.disabled = true; }
+    else { roChk.disabled = false; }
+    try {
+      bt = RotationEngine.runBacktest(etfs, stratOpts());
+    } catch (e) {
+      document.getElementById('stratNote').innerHTML = '<span style="color:#c0392b">参数组合无效: ' + e.message + '</span>';
+      return;
+    }
     yearly = RotationEngine.yearlyReturns(bt);
     rebuildTimeSelectors();
     setCustomBounds();
@@ -708,6 +718,12 @@ function updateStrategyNote(){
     renderAll(); renderYearChart(); updateSubtitle();
   };
 });
+// 初始加载也执行一次避险锁定(默认波动率目标15%已选中)
+(function(){
+  var volOn0 = +document.getElementById('volSel').value > 0;
+  var roChk0 = document.getElementById('riskOffChk');
+  if (volOn0) { roChk0.checked = true; roChk0.disabled = true; }
+})();
 updateStrategyNote();
 
 // ---- 指标卡 ----
