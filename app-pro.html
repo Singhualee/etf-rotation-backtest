@@ -82,13 +82,19 @@ tr.hl td{font-weight:700}
     <label class="rf">调仓日
       <select id="wdSel">
         <option value="0">周一</option><option value="1">周二</option><option value="2">周三</option>
-        <option value="3" selected>周四</option><option value="4">周五</option>
+        <option value="3">周四</option><option value="4" selected>周五</option>
       </select>
     </label>
     <label class="rf">动量窗口
       <select id="lbSel">
         <option value="20">20日</option><option value="22">22日</option>
         <option value="25" selected>25日</option><option value="30">30日</option>
+      </select>
+    </label>
+    <label class="rf">波动率目标
+      <select id="volSel">
+        <option value="">关闭</option><option value="0.12">12%</option>
+        <option value="0.15" selected>15%</option><option value="0.18">18%</option>
       </select>
     </label>
     <label class="rf"><input type="checkbox" id="riskOffChk" checked>避险（动量&lt;0 转国债）</label>
@@ -114,7 +120,7 @@ tr.hl td{font-weight:700}
 </div>
 
 <div class="card">
-  <h2>持仓时间轴<span class="hint">策略全仓持有的 ETF（四色区分）· ● 为切换点</span></h2>
+  <h2>持仓时间轴<span class="hint">策略持有的主力 ETF（四色区分）· ● 为切换点 · 波动率目标开启时部分仓位由国债补足（悬浮查看）</span></h2>
   <div id="holdChart" style="width:100%;height:150px"></div>
 </div>
 
@@ -149,7 +155,7 @@ tr.hl td{font-weight:700}
 (function(){
 'use strict';
 var COLORS = {'513100':'#2f6fed','511260':'#0f9e8e','518850':'#d99a1f','510300':'#7a5af5'};
-var APP_VER = 'Pro v1.0';   // 网页版本号, 显示在副标题便于分辨新旧副本
+var APP_VER = 'Pro v1.1';   // 网页版本号, 显示在副标题便于分辨新旧副本
 var EQ_COLOR = '#8a93a0', BAND_COLOR = '#b06a3b', STRAT_COLOR = '#d93831';
 var etfs = ETF_DATA.etfs;
 // V2: 不复权+分红重建口径; 旧V1缓存为有缺陷的腾讯qfq数据, 自动作废
@@ -177,18 +183,21 @@ var cacheInfo = null;   // 启动时若浏览器缓存比内嵌数据新则使�
     }
   }catch(e){}
 })();
-// ---- 策略参数(默认为优化结论: 周四调仓 + 25日动量 + 避险 + 0.1%切换成本) ----
+// ---- 策略参数(默认为实盘配置: 周五调仓 + 25日动量 + 波动率目标15% + 避险 + 0.1%切换成本) ----
 function stratOpts(){
   return {
     lookback: +document.getElementById('lbSel').value,
     rebalanceWeekday: +document.getElementById('wdSel').value,
+    volTarget: +document.getElementById('volSel').value || 0,
     riskOff: document.getElementById('riskOffChk').checked ? {floor:0, bondCode:'511260'} : null,
     costRate: +document.getElementById('costSel').value,
   };
 }
 function stratTag(){
   var wd=['周一','周二','周三','周四','周五'][+document.getElementById('wdSel').value];
+  var vol=+document.getElementById('volSel').value;
   return wd+'调仓/'+document.getElementById('lbSel').value+'日动量'+
+    (vol>0?'/波动目标'+(vol*100)+'%':'')+
     (document.getElementById('riskOffChk').checked?'/避险':'')+
     (+document.getElementById('costSel').value>0?'/含成本0.1%':'/零成本');
 }
@@ -677,13 +686,17 @@ function updateStrategyNote(){
   var wd=['周一','周二','周三','周四','周五'][+document.getElementById('wdSel').value];
   var ro=document.getElementById('riskOffChk').checked;
   var cost=+document.getElementById('costSel').value;
+  var vol=+document.getElementById('volSel').value;
   document.getElementById('stratNote').innerHTML =
     '策略：每<b>'+wd+'</b>（休市则顺延至当周下一交易日；若当周已无则提前至当周最后交易日，每周恰好调仓一次）收盘比较四只 ETF 过去 <b>'+
-    document.getElementById('lbSel').value+'</b> 个交易日涨幅，全仓持有最强者；并列时保持原持仓；数据不足者不参与比较。'+
+    document.getElementById('lbSel').value+'</b> 个交易日涨幅，持有最强者；并列时保持原持仓；数据不足者不参与比较。'+
     '避险规则<b>'+(ro?'开启':'关闭')+'</b>'+(ro?'：最强动量 &lt; 0 时，全仓转入 511260 十年国债ETF。':'。')+
-    '每次实际切换按 <b>'+(cost>0?(cost*100).toFixed(1)+'%':'0（不计成本）')+'</b> 扣减净值（建仓与"决定不切换"不产生交易成本）。';
+    (vol>0
+      ?'波动率目标<b>'+ (vol*100) +'%</b>开启：每个调仓日按持有 ETF 过去 20 个交易日实际波动率定仓——风险腿仓位 = min(100%, 目标波动率÷实际波动率)，余额持有 511260 国债ETF（实际波动率低于目标时满仓，不加杠杆）。'
+      :'波动率目标<b>关闭</b>：全仓持有单一 ETF。')+
+    '换手按实际权重变动计费，每次 <b>'+(cost>0?(cost*100).toFixed(1)+'%':'0（不计成本）')+'</b> 扣减净值（建仓与"决定不切换"不产生交易成本）。';
 }
-['wdSel','lbSel','riskOffChk','costSel'].forEach(function(id){
+['wdSel','lbSel','riskOffChk','costSel','volSel'].forEach(function(id){
   document.getElementById(id).onchange = function(){
     bt = RotationEngine.runBacktest(etfs, stratOpts());
     yearly = RotationEngine.yearlyReturns(bt);
@@ -795,7 +808,16 @@ function renderHoldChart(){
     tooltip:{formatter:function(p){
       if(p.seriesIndex===0){
         var v=p.value, e=v[0]===-1?{label:'建仓前(空仓)',code:''}:etfs[v[0]];
-        return e.label+' '+e.code+'<br>'+echarts.time.format(v[1],'{yyyy}-{MM}-{dd}')+' ~ '+echarts.time.format(v[2],'{yyyy}-{MM}-{dd}')+'（'+v[3]+' 交易日）';
+        var extra='';
+        if(bt.primaryW && v[0]>=0){
+          var bondIdx=etfs.findIndex(function(x){return x.code==='511260';});
+          if(v[0]!==bondIdx){
+            var rr=runs[p.dataIndex], s=0, c=0;
+            for(var wi=rr[1];wi<=rr[2];wi++){s+=bt.primaryW[wi];c++;}
+            extra='<br>期间平均风险腿仓位 '+(s/c*100).toFixed(0)+'%（余额持国债）';
+          }
+        }
+        return e.label+' '+e.code+'<br>'+echarts.time.format(v[1],'{yyyy}-{MM}-{dd}')+' ~ '+echarts.time.format(v[2],'{yyyy}-{MM}-{dd}')+'（'+v[3]+' 交易日）'+extra;
       }
       var s=marks[p.dataIndex]; return '切换：'+(s.from===null?'建仓':etfs[s.from].code+' → ')+etfs[s.to].code+(s.riskOff?'（避险）':'')+'<br>'+s.date;
     }},

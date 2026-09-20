@@ -11,9 +11,11 @@ const __proSetup = new Function('fs', 'dir',
   'eval(fs.readFileSync(dir + "/data.js", "utf8"));' +
   'return { RotationEngine: RotationEngine, ETF_DATA: ETF_DATA };');
 const { RotationEngine, ETF_DATA } = __proSetup(fs, __dirname);
-const PRO_OPTS = {lookback:25, rebalanceWeekday:3, costRate:0.001, riskOff:{floor:0, bondCode:'511260'}};
+const PRO_OPTS = {lookback:25, rebalanceWeekday:4, volTarget:0.15, costRate:0.001, riskOff:{floor:0, bondCode:'511260'}};
 const EXPbt = RotationEngine.runBacktest(ETF_DATA.etfs, PRO_OPTS);
 const EXPm = RotationEngine.computeMetrics(EXPbt, {rf:0.02});
+const fmtLocalDate = d => d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+const EXPmockEnd = (() => { const d = new Date(); while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() - 1); return fmtLocalDate(d); })();
 const fmtSigned = x => (x>=0?'+':'') + (x*100).toFixed(2) + '%';
 const EXP = {
   firstDate: EXPbt.dates[0],
@@ -218,8 +220,8 @@ setTimeout(async () => {
   check('刷新后副标题区间延至2013年起(全量替换生效)',
     document.getElementById('subtitle').textContent.includes('回测区间 ' + EXPmockStart),
     document.getElementById('subtitle').textContent);
-  check('刷新后副标题数据截至为最近交易日2026-09-18',
-    document.getElementById('subtitle').textContent.includes('数据截至 2026-09-18'),
+  check('刷新后副标题数据截至为最近交易日'+EXPmockEnd,
+    document.getElementById('subtitle').textContent.includes('数据截至 ' + EXPmockEnd),
     document.getElementById('subtitle').textContent);
   const refreshedCards = {};
   document.querySelectorAll('#metricCards .metric').forEach(m => {
@@ -234,7 +236,7 @@ setTimeout(async () => {
   check('缓存endDate与savedAt正确', (() => {
     if (!cachedRaw) return false;
     const c = JSON.parse(cachedRaw);
-    return c.endDate === '2026-09-18' && c.savedAt && c.etfs.length === 4 && c.etfs[0].dates.length > 3000;
+    return c.endDate === EXPmockEnd && c.savedAt && c.etfs.length === 4 && c.etfs[0].dates.length > 3000;
   })());
   check('缓存含分红表(510300/511260)', (() => {
     if (!cachedRaw) return false;
@@ -258,7 +260,7 @@ setTimeout(async () => {
   try {
     d2sub = dom2.window.document.getElementById('subtitle').textContent;
     d2status = dom2.window.document.getElementById('refreshStatus').textContent;
-    d2ok = d2sub.includes('回测区间 ' + EXPmockStart) && d2status.includes('已加载浏览器缓存数据（截至 2026-09-18）');
+    d2ok = d2sub.includes('回测区间 ' + EXPmockStart) && d2status.includes('已加载浏览器缓存数据（截至 ' + EXPmockEnd + '）');
   } catch (e) { d2ok = false; }
   check('二次打开自动加载缓存并提示', d2ok, d2sub + ' | ' + d2status);
 

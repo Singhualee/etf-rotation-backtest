@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """make_smoke_pro.py — 从 smoke-test.js 生成 smoke-test-pro.js:
-把旧策略(周五/20日)的硬编码预期值替换为按 Pro 参数(周四/25日/避险/0.1%成本)
+把旧策略(周五/20日)的硬编码预期值替换为按 Pro 参数(周五/25日/波动率目标15%/避险/0.1%成本)
 用同一引擎动态计算的期望值"""
 import re
 
@@ -18,7 +18,7 @@ const __proSetup = new Function('fs', 'dir',
   'eval(fs.readFileSync(dir + "/data.js", "utf8"));' +
   'return { RotationEngine: RotationEngine, ETF_DATA: ETF_DATA };');
 const { RotationEngine, ETF_DATA } = __proSetup(fs, __dirname);
-const PRO_OPTS = {lookback:25, rebalanceWeekday:3, costRate:0.001, riskOff:{floor:0, bondCode:'511260'}};
+const PRO_OPTS = {lookback:25, rebalanceWeekday:4, volTarget:0.15, costRate:0.001, riskOff:{floor:0, bondCode:'511260'}};
 const EXPbt = RotationEngine.runBacktest(ETF_DATA.etfs, PRO_OPTS);
 const EXPm = RotationEngine.computeMetrics(EXPbt, {rf:0.02});
 const fmtSigned = x => (x>=0?'+':'') + (x*100).toFixed(2) + '%';
@@ -87,6 +87,25 @@ src = src.replace("'回测区间 2013-06-14'", "'回测区间 ' + EXPmockStart")
 old = "return c5['总收益率'] === '+270.04%';"
 new = "return c5['总收益率'] === EXP.total;"
 assert old in src; src = src.replace(old, new, 1)
+
+# 8. mock 数据"最近交易日"随真实日期变化, 三处硬编码 2026-09-18 改为动态计算
+#    (mock 生成工作日序列, 站点刷新取到"今天"为止的最近工作日)
+inject_end = """const fmtLocalDate = d => d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+const EXPmockEnd = (() => { const d = new Date(); while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() - 1); return fmtLocalDate(d); })();"""
+anchor2 = "const fmtSigned = x => (x>=0?'+':'') + (x*100).toFixed(2) + '%';"
+assert anchor2 in src
+src = src.replace(anchor2, inject_end + "\n" + anchor2, 1)
+pairs = [
+  ("check('刷新后副标题数据截至为最近交易日2026-09-18',\n    document.getElementById('subtitle').textContent.includes('数据截至 2026-09-18'),",
+   "check('刷新后副标题数据截至为最近交易日'+EXPmockEnd,\n    document.getElementById('subtitle').textContent.includes('数据截至 ' + EXPmockEnd),"),
+  ("return c.endDate === '2026-09-18' && c.savedAt && c.etfs.length === 4 && c.etfs[0].dates.length > 3000;",
+   "return c.endDate === EXPmockEnd && c.savedAt && c.etfs.length === 4 && c.etfs[0].dates.length > 3000;"),
+  ("d2status.includes('已加载浏览器缓存数据（截至 2026-09-18）');",
+   "d2status.includes('已加载浏览器缓存数据（截至 ' + EXPmockEnd + '）');"),
+]
+for old, new in pairs:
+    assert old in src, "未找到: " + old[:60]
+    src = src.replace(old, new, 1)
 
 open(f"{DIR}/smoke-test-pro.js", "w", encoding="utf-8").write(src)
 print("生成完成: smoke-test-pro.js")

@@ -107,12 +107,91 @@
       }
       if (bondK < 0) throw new Error('riskOff.bondCode 不在标的列表中: ' + riskOff.bondCode);
     }
+    // 6.6 可选: 波动率目标(部分仓位)。风险腿仓位 = min(1, volTarget/实现波动率), 余额持避险债券
+    //     实现波动率 = 过去 volLookback 个日历交易日日收益标准差 × sqrt(252) 年化
+    var volTarget = options.volTarget || 0;
+    var volLB = options.volLookback || 20;
+    if (volTarget > 0 && bondK < 0) throw new Error('volTarget 需要 riskOff.bondCode 指定避险债券ETF');
+    function realizedVol(i, k) {
+      var rs = [], m = 0, j;
+      for (j = i - volLB + 1; j <= i; j++) {
+        if (ffill[k][j - 1] === null || ffill[k][j] === null) return null;
+        rs.push(ffill[k][j] / ffill[k][j - 1] - 1);
+      }
+      if (rs.length < volLB) return null;
+      for (j = 0; j < rs.length; j++) m += rs[j];
+      m /= rs.length;
+      var v = 0;
+      for (j = 0; j < rs.length; j++) v += (rs[j] - m) * (rs[j] - m);
+      return Math.sqrt(v / (rs.length - 1)) * Math.sqrt(252);
+    }
 
     // 7. 逐日模拟
     var dates = [], nav = [], holding = [], switches = [];
     var held = null, prevNav = 1;
+    var useVol = volTarget > 0;
+    var primaryW = []; // 波动率目标开启时: 每日风险腿权重(0~1); 关闭时恒为1
+    var w = null, pendingCost = 0;
     for (var i5 = firstRebIdx; i5 < n; i5++) {
       var d5 = calendar[i5];
+      if (useVol) {
+        // ---- 波动率目标路径: 部分仓位, 权重在调仓日收盘重算, 次日起生效 ----
+        var wNew = null;
+        if (rebSet[i5]) {
+          var best7 = -Infinity, bestK7 = -1, momenta7 = {};
+          for (var k5 = 0; k5 < K; k5++) {
+            var m7 = momentumAt(i5, k5);
+            momenta7[etfs[k5].code] = m7;
+            if (m7 !== null && m7 > best7) { best7 = m7; bestK7 = k5; }
+          }
+          if (bestK7 >= 0) {
+            var chosen7 = bestK7;
+            var isRiskOff7 = false;
+            if (riskOff && best7 < riskOff.floor) { chosen7 = bondK; isRiskOff7 = chosen7 !== bestK7; }
+            var chosenM7 = momenta7[etfs[chosen7].code];
+            if (held === null) {
+              switches.push({ date: d5, from: null, to: chosen7, momenta: momenta7, riskOff: isRiskOff7 });
+              held = chosen7;
+            } else if (chosen7 !== held && chosenM7 > momenta7[etfs[held].code]) {
+              switches.push({ date: d5, from: held, to: chosen7, momenta: momenta7, riskOff: isRiskOff7 });
+              held = chosen7;
+            }
+            // 重算权重(无论是否切换标的, 每个调仓日都按最新波动率定仓)
+            var tw = [];
+            for (var k8 = 0; k8 < K; k8++) tw.push(0);
+            if (held !== null) {
+              if (held === bondK) {
+                tw[held] = 1;
+              } else {
+                var vol8 = realizedVol(i5, held);
+                if (vol8 === null || vol8 <= 0) { tw[held] = 1; }
+                else { tw[held] = Math.min(1, volTarget / vol8); tw[bondK] = 1 - tw[held]; }
+              }
+            }
+            var tv8 = 0, hadW = w !== null;
+            for (var k9 = 0; k9 < K; k9++) tv8 += Math.abs(tw[k9] - (hadW ? w[k9] : 0));
+            pendingCost = hadW ? costRate * tv8 : 0; // 建仓不计成本
+            wNew = tw;
+          }
+        }
+        var v7;
+        if (held === null) {
+          v7 = 1;
+        } else {
+          var r7 = 0;
+          for (var k10 = 0; k10 < K; k10++) {
+            if (w !== null && w[k10] > 0) r7 += w[k10] * (ffill[k10][i5] / ffill[k10][i5 - 1] - 1);
+          }
+          v7 = prevNav * (1 + r7) * (1 - pendingCost);
+        }
+        if (wNew !== null) w = wNew;
+        pendingCost = 0;
+        dates.push(d5); nav.push(v7);
+        holding.push(held === null ? -1 : held);
+        primaryW.push(held === null || held === bondK || !w ? 1 : w[held]);
+        prevNav = v7;
+        continue;
+      }
       if (held === null) {
         var v = 1; // 首日建仓, 净值=1 (建仓不计成本)
       } else {
@@ -185,6 +264,7 @@
 
     return {
       dates: dates, nav: nav, holding: holding, switches: switches,
+      primaryW: volTarget > 0 ? primaryW : null,
       benchmarks: benchmarks, equalNav: equalNav, bandEqualNav: bandEqualNav,
       bandRebCount: bandRebCount,
       rebCount: Object.keys(rebSet).length,
