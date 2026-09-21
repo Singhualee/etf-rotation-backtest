@@ -84,17 +84,17 @@ setTimeout(async () => {
 
   // ---- A. 启动态 ----
   check('A1 无未捕获异常', errors.length === 0, errors.join(' | '));
-  check('A2 volSel 存在且默认15%', document.getElementById('volSel').value === '0.15', document.getElementById('volSel').value);
+  check('A2 volSel 存在且默认18%', document.getElementById('volSel').value === '0.18', document.getElementById('volSel').value);
   check('A3 volSel 共4档(关闭/12/15/18)', document.querySelectorAll('#volSel option').length === 4);
   check('A4 wdSel 默认周五', document.getElementById('wdSel').value === '4');
   check('A5 波动目标开启时避险复选框已锁定', document.getElementById('riskOffChk').disabled === true);
   const note0 = document.getElementById('stratNote').textContent;
-  check('A6 口径说明含波动率目标15%与仓位补足说明', note0.includes('波动率目标') && note0.includes('15%') && note0.includes('补足'));
+  check('A6 口径说明含波动率目标18%与仓位补足说明', note0.includes('波动率目标') && note0.includes('18%') && note0.includes('补足'));
 
   const rf = +document.getElementById('rfSlider').value / 100;
   let m = RE.computeMetrics(RE.runBacktest(ETF_DATA_G.etfs, pageOpts()), { rf });
   let cards = pageCards();
-  cmpCards('A7 默认参数下10项指标卡与引擎一致(vol15%)', cards, m);
+  cmpCards('A7 默认参数下10项指标卡与引擎一致(vol18%)', cards, m);
   check('A8 指标卡共10张', Object.keys(cards).length === 10, Object.keys(cards).join(','));
 
   // ---- B. 参数矩阵: volSel 全档位 ----

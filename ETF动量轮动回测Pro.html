@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Pro 单文件构建版, 由 build_pro.py 生成于 2026-09-21 23:51 -->
+<!-- Pro 单文件构建版, 由 build_pro.py 生成于 2026-09-22 00:55 -->
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -543,7 +543,7 @@ tr.hl td{font-weight:700}
     <label class="rf">波动率目标
       <select id="volSel">
         <option value="">关闭</option><option value="0.12">12%</option>
-        <option value="0.15" selected>15%</option><option value="0.18">18%</option>
+        <option value="0.15">15%</option><option value="0.18" selected>18%</option>
       </select>
     </label>
     <label class="rf"><input type="checkbox" id="riskOffChk" checked>避险（动量&lt;0 转国债）</label>
@@ -604,7 +604,7 @@ tr.hl td{font-weight:700}
 (function(){
 'use strict';
 var COLORS = {'513100':'#2f6fed','511260':'#0f9e8e','518850':'#d99a1f','510300':'#7a5af5'};
-var APP_VER = 'Pro v1.1';   // 网页版本号, 显示在副标题便于分辨新旧副本
+var APP_VER = 'Pro v1.2';   // 网页版本号, 显示在副标题便于分辨新旧副本
 var EQ_COLOR = '#8a93a0', BAND_COLOR = '#b06a3b', STRAT_COLOR = '#d93831';
 var etfs = ETF_DATA.etfs;
 // V2: 不复权+分红重建口径; 旧V1缓存为有缺陷的腾讯qfq数据, 自动作废
@@ -632,7 +632,7 @@ var cacheInfo = null;   // 启动时若浏览器缓存比内嵌数据新则使�
     }
   }catch(e){}
 })();
-// ---- 策略参数(默认为实盘配置: 周五调仓 + 25日动量 + 波动率目标15% + 避险 + 0.1%切换成本) ----
+// ---- 策略参数(默认为实盘配置: 周五调仓 + 25日动量 + 波动率目标18% + 避险 + 0.1%切换成本) ----
 function stratOpts(){
   return {
     lookback: +document.getElementById('lbSel').value,
@@ -1167,7 +1167,7 @@ function updateStrategyNote(){
     renderAll(); renderYearChart(); updateSubtitle();
   };
 });
-// 初始加载也执行一次避险锁定(默认波动率目标15%已选中)
+// 初始加载也执行一次避险锁定(默认波动率目标18%已选中)
 (function(){
   var volOn0 = +document.getElementById('volSel').value > 0;
   var roChk0 = document.getElementById('riskOffChk');
