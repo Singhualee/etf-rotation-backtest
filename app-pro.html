@@ -46,6 +46,8 @@ tr.hl td{font-weight:700}
 .notes{font-size:12px;color:var(--muted);line-height:1.8}
 .notes code{background:#eef1f4;padding:1px 5px;border-radius:4px;font-size:11.5px}
 .scroll{max-height:420px;overflow:auto}
+/* 切换记录表头冻结: 滚动时固定在容器顶部, 遮挡线用box-shadow(collapse模式下sticky的border会失效) */
+#swTable th{position:sticky;top:0;background:var(--bg);z-index:2;box-shadow:0 1px 0 var(--border)}
 .legendbox{display:flex;flex-wrap:wrap;gap:14px;font-size:12px;color:var(--muted);margin-top:6px}
 .legendbox span i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
 </style>
