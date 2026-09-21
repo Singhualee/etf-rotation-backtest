@@ -170,7 +170,10 @@
                 else { tw[held] = Math.min(1, volTarget / vol8); tw[bondK] = 1 - tw[held]; }
               }
             }
-            rebalances.push({ date: d5, from: heldBefore7, to: held, riskOff: isRiskOff7 && heldBefore7 !== held, momenta: momenta7, w: tw });
+            // 各标的当日20日年化波动率(供展示, 与定仓用的 realizedVol 同源)
+            var vols7 = [];
+            for (var kv7 = 0; kv7 < K; kv7++) vols7.push(realizedVol(i5, kv7));
+            rebalances.push({ date: d5, from: heldBefore7, to: held, riskOff: isRiskOff7 && heldBefore7 !== held, momenta: momenta7, vols: vols7, w: tw });
             var tv8 = 0, hadW = w !== null;
             for (var k9 = 0; k9 < K; k9++) tv8 += Math.abs(tw[k9] - (hadW ? w[k9] : 0));
             // 换手按单边计: Σ|Δw|/2. 全仓切换 Σ|Δw|=2 → 与基础路径每次切换扣 costRate 完全一致
@@ -224,7 +227,9 @@
             if (costRate > 0) v *= (1 - costRate); // 切换持仓: 扣减交易成本
           }
           // 并列(动量不严格大于当前持仓)时保持原持仓, 不产生交易与成本
-          rebalances.push({ date: d5, from: heldBefore, to: held, riskOff: isRiskOff && heldBefore !== held, momenta: momenta, w: null });
+          var vols = [];
+          for (var kv = 0; kv < K; kv++) vols.push(realizedVol(i5, kv));
+          rebalances.push({ date: d5, from: heldBefore, to: held, riskOff: isRiskOff && heldBefore !== held, momenta: momenta, vols: vols, w: null });
         }
       }
       dates.push(d5);

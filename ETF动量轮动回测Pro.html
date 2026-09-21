@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Pro 单文件构建版, 由 build_pro.py 生成于 2026-09-21 08:29 -->
+<!-- Pro 单文件构建版, 由 build_pro.py 生成于 2026-09-21 23:28 -->
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -230,7 +230,10 @@ var ETF_DATA = {"meta":{"fetchedAt":"2026-09-19","source":"腾讯行情接口(�
                 else { tw[held] = Math.min(1, volTarget / vol8); tw[bondK] = 1 - tw[held]; }
               }
             }
-            rebalances.push({ date: d5, from: heldBefore7, to: held, riskOff: isRiskOff7 && heldBefore7 !== held, momenta: momenta7, w: tw });
+            // 各标的当日20日年化波动率(供展示, 与定仓用的 realizedVol 同源)
+            var vols7 = [];
+            for (var kv7 = 0; kv7 < K; kv7++) vols7.push(realizedVol(i5, kv7));
+            rebalances.push({ date: d5, from: heldBefore7, to: held, riskOff: isRiskOff7 && heldBefore7 !== held, momenta: momenta7, vols: vols7, w: tw });
             var tv8 = 0, hadW = w !== null;
             for (var k9 = 0; k9 < K; k9++) tv8 += Math.abs(tw[k9] - (hadW ? w[k9] : 0));
             // 换手按单边计: Σ|Δw|/2. 全仓切换 Σ|Δw|=2 → 与基础路径每次切换扣 costRate 完全一致
@@ -284,7 +287,9 @@ var ETF_DATA = {"meta":{"fetchedAt":"2026-09-19","source":"腾讯行情接口(�
             if (costRate > 0) v *= (1 - costRate); // 切换持仓: 扣减交易成本
           }
           // 并列(动量不严格大于当前持仓)时保持原持仓, 不产生交易与成本
-          rebalances.push({ date: d5, from: heldBefore, to: held, riskOff: isRiskOff && heldBefore !== held, momenta: momenta, w: null });
+          var vols = [];
+          for (var kv = 0; kv < K; kv++) vols.push(realizedVol(i5, kv));
+          rebalances.push({ date: d5, from: heldBefore, to: held, riskOff: isRiskOff && heldBefore !== held, momenta: momenta, vols: vols, w: null });
         }
       }
       dates.push(d5);
@@ -577,7 +582,7 @@ tr.hl td{font-weight:700}
 </div>
 
 <div class="card">
-  <h2>切换记录<span class="hint">窗口内全部调仓决策（含建仓与未换标的的重新定仓）· 调仓后持仓=该日收盘决策的完整组合，次日起生效 · 右侧四列为当日动量</span></h2>
+  <h2>切换记录<span class="hint">窗口内全部调仓决策（含建仓与未换标的的重新定仓）· 调仓后持仓=该日收盘决策的完整组合，次日起生效 · 右侧四列上行=当日25日动量，下行=20日年化波动率σ（橙色=σ超过波动目标，风险腿仓位被压缩）</span></h2>
   <div class="scroll"><table id="swTable"></table></div>
 </div>
 
@@ -1362,8 +1367,9 @@ function renderSwTable(){
   // 全部调仓日决策(含建仓与未换标的的重新定仓), 无 rebalances 的旧构建退回 switches
   var events = bt.rebalances || bt.switches;
   var rows = events.filter(function(s){return s.date>=d0 && s.date<=d1;});
+  var vt = +document.getElementById('volSel').value || 0;   // 当前波动目标(0=关闭, 不做σ高亮)
   var html = '<tr><th>日期</th><th>操作</th><th>调仓后持仓</th>'
-    + etfs.map(function(e){return '<th>'+e.label+'<br>'+e.code+'</th>';}).join('')+'</tr>';
+    + etfs.map(function(e){return '<th>'+e.label+'<br>'+e.code+'<br><span style="font-weight:400;font-size:11px;color:var(--muted)">动量 / 20日σ</span></th>';}).join('')+'</tr>';
   rows.slice().reverse().forEach(function(s){
     var dir;
     if (s.from===null) {
@@ -1383,10 +1389,16 @@ function renderSwTable(){
       pos = etfs[s.to].label+' 100%';
     }
     html += '<tr><td>'+s.date+'</td><td>'+dir+'</td><td style="white-space:nowrap">'+pos+'</td>'
-      + etfs.map(function(e){
+      + etfs.map(function(e,k){
           var m=s.momenta[e.code];
           var best = etfs.every(function(e2){ return m>= (s.momenta[e2.code]===null?-Infinity:s.momenta[e2.code]); });
-          return '<td class="'+cls(m)+'"'+(best?' style="font-weight:700"':'')+'>'+(m===null?'—':fmtPct(m,true))+'</td>';
+          // 第二行: 20日年化波动率(与引擎定仓同源); 超过波动目标时橙色提示"仓位被压"
+          var volLine = '';
+          if (s.vols && s.vols[k]!=null) {
+            var hot = vt>0 && s.vols[k]>vt;
+            volLine = '<br><span style="font-size:11px;color:'+(hot?'#b45309':'var(--muted)')+'">σ '+(s.vols[k]*100).toFixed(1)+'%</span>';
+          }
+          return '<td class="'+cls(m)+'"'+(best?' style="font-weight:700"':'')+'>'+(m===null?'—':fmtPct(m,true))+volLine+'</td>';
         }).join('')+'</tr>';
   });
   if(!rows.length) html='<tr><td style="text-align:center;color:var(--muted)">该窗口内无调仓事件</td></tr>';
