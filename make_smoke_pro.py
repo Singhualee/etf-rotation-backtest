@@ -24,7 +24,7 @@ const EXPm = RotationEngine.computeMetrics(EXPbt, {rf:0.02});
 const fmtSigned = x => (x>=0?'+':'') + (x*100).toFixed(2) + '%';
 const EXP = {
   firstDate: EXPbt.dates[0],
-  rows: EXPbt.switches.length + 1,   // 表头 + 全部调仓事件(含建仓)
+  rows: (EXPbt.rebalances || EXPbt.switches).length + 1,   // 表头 + 全部调仓决策(含建仓与重新定仓)
   total: fmtSigned(EXPm.total),
   annualized: fmtSigned(EXPm.annualized),
   sharpe: EXPm.sharpe.toFixed(3),

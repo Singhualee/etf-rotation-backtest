@@ -128,7 +128,7 @@
     }
 
     // 7. 逐日模拟
-    var dates = [], nav = [], holding = [], switches = [];
+    var dates = [], nav = [], holding = [], switches = [], rebalances = [];
     var held = null, prevNav = 1;
     var useVol = volTarget > 0;
     var primaryW = []; // 波动率目标开启时: 每日风险腿权重(0~1); 关闭时恒为1
@@ -146,6 +146,7 @@
             if (m7 !== null && m7 > best7) { best7 = m7; bestK7 = k5; }
           }
           if (bestK7 >= 0) {
+            var heldBefore7 = held;
             var chosen7 = bestK7;
             var isRiskOff7 = false;
             if (riskOff && best7 < riskOff.floor) { chosen7 = bondK; isRiskOff7 = chosen7 !== bestK7; }
@@ -169,6 +170,7 @@
                 else { tw[held] = Math.min(1, volTarget / vol8); tw[bondK] = 1 - tw[held]; }
               }
             }
+            rebalances.push({ date: d5, from: heldBefore7, to: held, riskOff: isRiskOff7 && heldBefore7 !== held, momenta: momenta7, w: tw });
             var tv8 = 0, hadW = w !== null;
             for (var k9 = 0; k9 < K; k9++) tv8 += Math.abs(tw[k9] - (hadW ? w[k9] : 0));
             // 换手按单边计: Σ|Δw|/2. 全仓切换 Σ|Δw|=2 → 与基础路径每次切换扣 costRate 完全一致
@@ -208,6 +210,7 @@
         }
         if (bestK >= 0) {
           // 绝对动量避险: 最强动量跌破阈值时, 改持避险债券ETF
+          var heldBefore = held;
           var chosen = bestK;
           var isRiskOff = false;
           if (riskOff && best < riskOff.floor) { chosen = bondK; isRiskOff = chosen !== bestK; }
@@ -221,6 +224,7 @@
             if (costRate > 0) v *= (1 - costRate); // 切换持仓: 扣减交易成本
           }
           // 并列(动量不严格大于当前持仓)时保持原持仓, 不产生交易与成本
+          rebalances.push({ date: d5, from: heldBefore, to: held, riskOff: isRiskOff && heldBefore !== held, momenta: momenta, w: null });
         }
       }
       dates.push(d5);
@@ -265,7 +269,7 @@
     }
 
     return {
-      dates: dates, nav: nav, holding: holding, switches: switches,
+      dates: dates, nav: nav, holding: holding, switches: switches, rebalances: rebalances,
       primaryW: volTarget > 0 ? primaryW : null,
       benchmarks: benchmarks, equalNav: equalNav, bandEqualNav: bandEqualNav,
       bandRebCount: bandRebCount,

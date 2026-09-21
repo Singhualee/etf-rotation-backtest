@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Pro 单文件构建版, 由 build_pro.py 生成于 2026-09-21 01:29 -->
+<!-- Pro 单文件构建版, 由 build_pro.py 生成于 2026-09-21 08:03 -->
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -188,7 +188,7 @@ var ETF_DATA = {"meta":{"fetchedAt":"2026-09-19","source":"腾讯行情接口(�
     }
 
     // 7. 逐日模拟
-    var dates = [], nav = [], holding = [], switches = [];
+    var dates = [], nav = [], holding = [], switches = [], rebalances = [];
     var held = null, prevNav = 1;
     var useVol = volTarget > 0;
     var primaryW = []; // 波动率目标开启时: 每日风险腿权重(0~1); 关闭时恒为1
@@ -206,6 +206,7 @@ var ETF_DATA = {"meta":{"fetchedAt":"2026-09-19","source":"腾讯行情接口(�
             if (m7 !== null && m7 > best7) { best7 = m7; bestK7 = k5; }
           }
           if (bestK7 >= 0) {
+            var heldBefore7 = held;
             var chosen7 = bestK7;
             var isRiskOff7 = false;
             if (riskOff && best7 < riskOff.floor) { chosen7 = bondK; isRiskOff7 = chosen7 !== bestK7; }
@@ -229,6 +230,7 @@ var ETF_DATA = {"meta":{"fetchedAt":"2026-09-19","source":"腾讯行情接口(�
                 else { tw[held] = Math.min(1, volTarget / vol8); tw[bondK] = 1 - tw[held]; }
               }
             }
+            rebalances.push({ date: d5, from: heldBefore7, to: held, riskOff: isRiskOff7 && heldBefore7 !== held, momenta: momenta7, w: tw });
             var tv8 = 0, hadW = w !== null;
             for (var k9 = 0; k9 < K; k9++) tv8 += Math.abs(tw[k9] - (hadW ? w[k9] : 0));
             // 换手按单边计: Σ|Δw|/2. 全仓切换 Σ|Δw|=2 → 与基础路径每次切换扣 costRate 完全一致
@@ -268,6 +270,7 @@ var ETF_DATA = {"meta":{"fetchedAt":"2026-09-19","source":"腾讯行情接口(�
         }
         if (bestK >= 0) {
           // 绝对动量避险: 最强动量跌破阈值时, 改持避险债券ETF
+          var heldBefore = held;
           var chosen = bestK;
           var isRiskOff = false;
           if (riskOff && best < riskOff.floor) { chosen = bondK; isRiskOff = chosen !== bestK; }
@@ -281,6 +284,7 @@ var ETF_DATA = {"meta":{"fetchedAt":"2026-09-19","source":"腾讯行情接口(�
             if (costRate > 0) v *= (1 - costRate); // 切换持仓: 扣减交易成本
           }
           // 并列(动量不严格大于当前持仓)时保持原持仓, 不产生交易与成本
+          rebalances.push({ date: d5, from: heldBefore, to: held, riskOff: isRiskOff && heldBefore !== held, momenta: momenta, w: null });
         }
       }
       dates.push(d5);
@@ -325,7 +329,7 @@ var ETF_DATA = {"meta":{"fetchedAt":"2026-09-19","source":"腾讯行情接口(�
     }
 
     return {
-      dates: dates, nav: nav, holding: holding, switches: switches,
+      dates: dates, nav: nav, holding: holding, switches: switches, rebalances: rebalances,
       primaryW: volTarget > 0 ? primaryW : null,
       benchmarks: benchmarks, equalNav: equalNav, bandEqualNav: bandEqualNav,
       bandRebCount: bandRebCount,
@@ -573,7 +577,7 @@ tr.hl td{font-weight:700}
 </div>
 
 <div class="card">
-  <h2>切换记录<span class="hint">窗口内全部调仓事件（含首次建仓）· 表格显示四只 ETF 当日动量</span></h2>
+  <h2>切换记录<span class="hint">窗口内全部调仓决策（含建仓与未换标的的重新定仓）· 调仓后持仓=该日收盘决策的完整组合，次日起生效 · 右侧四列为当日动量</span></h2>
   <div class="scroll"><table id="swTable"></table></div>
 </div>
 
@@ -1337,15 +1341,30 @@ function renderCmpTable(){
 // ---- 切换记录 ----
 function renderSwTable(){
   var d0=bt.dates[win.i0], d1=bt.dates[win.i1];
-  var rows = bt.switches.filter(function(s){return s.date>=d0 && s.date<=d1;});
-  var html = '<tr><th>日期</th><th>切换方向</th>'
+  // 全部调仓日决策(含建仓与未换标的的重新定仓), 无 rebalances 的旧构建退回 switches
+  var events = bt.rebalances || bt.switches;
+  var rows = events.filter(function(s){return s.date>=d0 && s.date<=d1;});
+  var html = '<tr><th>日期</th><th>操作</th><th>调仓后持仓</th>'
     + etfs.map(function(e){return '<th>'+e.label+'<br>'+e.code+'</th>';}).join('')+'</tr>';
   rows.slice().reverse().forEach(function(s){
-    var dir = s.from===null
-      ? '<span class="tag" style="background:#8a93a0">建仓</span> → '+etfs[s.to].label
-      : etfs[s.from].label+' <span style="color:'+STRAT_COLOR+'">→</span> '+etfs[s.to].label;
+    var dir;
+    if (s.from===null) {
+      dir = '<span class="tag" style="background:#8a93a0">建仓</span> → '+etfs[s.to].label;
+    } else if (s.from!==s.to) {
+      dir = etfs[s.from].label+' <span style="color:'+STRAT_COLOR+'">→</span> '+etfs[s.to].label;
+    } else {
+      dir = '<span style="color:var(--muted)">'+(bt.primaryW?'重新定仓':'保持持仓')+'</span>';
+    }
     if (s.riskOff) dir += ' <span class="tag" style="background:#0f9e8e">避险</span>';
-    html += '<tr><td>'+s.date+'</td><td>'+dir+'</td>'
+    // 调仓后持仓: 该日收盘决策的完整组合(波动率目标下为 风险腿+国债 两腿, 次日起生效)
+    var pos;
+    if (s.w) {
+      pos = etfs.map(function(e,k){ return s.w[k]>0 ? etfs[k].label+' '+(s.w[k]*100).toFixed(0)+'%' : ''; })
+                .filter(Boolean).join(' + ');
+    } else {
+      pos = etfs[s.to].label+' 100%';
+    }
+    html += '<tr><td>'+s.date+'</td><td>'+dir+'</td><td style="white-space:nowrap">'+pos+'</td>'
       + etfs.map(function(e){
           var m=s.momenta[e.code];
           var best = etfs.every(function(e2){ return m>= (s.momenta[e2.code]===null?-Infinity:s.momenta[e2.code]); });

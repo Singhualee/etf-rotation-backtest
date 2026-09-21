@@ -135,7 +135,7 @@ tr.hl td{font-weight:700}
 </div>
 
 <div class="card">
-  <h2>切换记录<span class="hint">窗口内全部调仓事件（含首次建仓）· 表格显示四只 ETF 当日动量</span></h2>
+  <h2>切换记录<span class="hint">窗口内全部调仓决策（含建仓与未换标的的重新定仓）· 调仓后持仓=该日收盘决策的完整组合，次日起生效 · 右侧四列为当日动量</span></h2>
   <div class="scroll"><table id="swTable"></table></div>
 </div>
 
@@ -899,15 +899,30 @@ function renderCmpTable(){
 // ---- 切换记录 ----
 function renderSwTable(){
   var d0=bt.dates[win.i0], d1=bt.dates[win.i1];
-  var rows = bt.switches.filter(function(s){return s.date>=d0 && s.date<=d1;});
-  var html = '<tr><th>日期</th><th>切换方向</th>'
+  // 全部调仓日决策(含建仓与未换标的的重新定仓), 无 rebalances 的旧构建退回 switches
+  var events = bt.rebalances || bt.switches;
+  var rows = events.filter(function(s){return s.date>=d0 && s.date<=d1;});
+  var html = '<tr><th>日期</th><th>操作</th><th>调仓后持仓</th>'
     + etfs.map(function(e){return '<th>'+e.label+'<br>'+e.code+'</th>';}).join('')+'</tr>';
   rows.slice().reverse().forEach(function(s){
-    var dir = s.from===null
-      ? '<span class="tag" style="background:#8a93a0">建仓</span> → '+etfs[s.to].label
-      : etfs[s.from].label+' <span style="color:'+STRAT_COLOR+'">→</span> '+etfs[s.to].label;
+    var dir;
+    if (s.from===null) {
+      dir = '<span class="tag" style="background:#8a93a0">建仓</span> → '+etfs[s.to].label;
+    } else if (s.from!==s.to) {
+      dir = etfs[s.from].label+' <span style="color:'+STRAT_COLOR+'">→</span> '+etfs[s.to].label;
+    } else {
+      dir = '<span style="color:var(--muted)">'+(bt.primaryW?'重新定仓':'保持持仓')+'</span>';
+    }
     if (s.riskOff) dir += ' <span class="tag" style="background:#0f9e8e">避险</span>';
-    html += '<tr><td>'+s.date+'</td><td>'+dir+'</td>'
+    // 调仓后持仓: 该日收盘决策的完整组合(波动率目标下为 风险腿+国债 两腿, 次日起生效)
+    var pos;
+    if (s.w) {
+      pos = etfs.map(function(e,k){ return s.w[k]>0 ? etfs[k].label+' '+(s.w[k]*100).toFixed(0)+'%' : ''; })
+                .filter(Boolean).join(' + ');
+    } else {
+      pos = etfs[s.to].label+' 100%';
+    }
+    html += '<tr><td>'+s.date+'</td><td>'+dir+'</td><td style="white-space:nowrap">'+pos+'</td>'
       + etfs.map(function(e){
           var m=s.momenta[e.code];
           var best = etfs.every(function(e2){ return m>= (s.momenta[e2.code]===null?-Infinity:s.momenta[e2.code]); });
