@@ -135,7 +135,7 @@ tr.hl td{font-weight:700}
 </div>
 
 <div class="card">
-  <h2>切换记录<span class="hint">窗口内全部调仓决策（含建仓与未换标的的重新定仓）· 调仓后持仓=该日收盘决策的完整组合，次日起生效 · 右侧四列上行=当日25日动量，下行=20日年化波动率σ（橙色=σ超过波动目标，风险腿仓位被压缩）</span></h2>
+  <h2>切换记录<span class="hint">窗口内全部调仓决策（含建仓与未换标的的重新定仓）· 调仓后持仓=该日收盘决策的完整组合，次日起生效 · 右侧四列上行=当日25日动量（红绿），下行=20日年化波动率σ（蓝色；深蓝加粗=σ超过波动目标，风险腿仓位被压缩）</span></h2>
   <div class="scroll"><table id="swTable"></table></div>
 </div>
 
@@ -945,11 +945,11 @@ function renderSwTable(){
       + etfs.map(function(e,k){
           var m=s.momenta[e.code];
           var best = etfs.every(function(e2){ return m>= (s.momenta[e2.code]===null?-Infinity:s.momenta[e2.code]); });
-          // 第二行: 20日年化波动率(与引擎定仓同源); 超过波动目标时橙色提示"仓位被压"
+          // 第二行: 20日年化波动率(与引擎定仓同源); 统一蓝色系, 与红绿动量区分; 超波动目标时深蓝加粗
           var volLine = '';
           if (s.vols && s.vols[k]!=null) {
             var hot = vt>0 && s.vols[k]>vt;
-            volLine = '<br><span style="font-size:11px;color:'+(hot?'#b45309':'var(--muted)')+'">σ '+(s.vols[k]*100).toFixed(1)+'%</span>';
+            volLine = '<br><span style="font-size:11px;color:'+(hot?'#185FA5':'#7aa7d4')+';'+(hot?'font-weight:700':'')+'">σ '+(s.vols[k]*100).toFixed(1)+'%</span>';
           }
           return '<td class="'+cls(m)+'"'+(best?' style="font-weight:700"':'')+'>'+(m===null?'—':fmtPct(m,true))+volLine+'</td>';
         }).join('')+'</tr>';
