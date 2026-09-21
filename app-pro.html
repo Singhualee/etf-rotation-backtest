@@ -734,6 +734,24 @@ function pseudoBT(arr){ return {dates:bt.dates, nav:arr, holding:[], switches:[]
 
 function renderMetrics(){
   var m = RotationEngine.computeMetrics(bt,{rf:rf,i0:win.i0,i1:win.i1});
+  // 波动率目标模式: 统计窗口内重新定仓次数与年化换手(单边 Σ|Δw|/2, 与成本口径一致)
+  var swSub = '窗口内实际切换';
+  if (bt.rebalances && bt.primaryW) {
+    var reCount = 0, turnover = 0;
+    for (var i=0;i<bt.rebalances.length;i++){
+      var ev = bt.rebalances[i];
+      var inWin = ev.date>=bt.dates[win.i0] && ev.date<=bt.dates[win.i1];
+      var prev = i>0 ? bt.rebalances[i-1].w : null;
+      if (prev && inWin) {
+        var dv = 0;
+        for (var k=0;k<ev.w.length;k++) dv += Math.abs(ev.w[k]-prev[k]);
+        turnover += dv/2;
+      }
+      if (inWin && ev.from!==null && ev.from===ev.to) reCount++;
+    }
+    var annTurnover = m.tradingDays>0 ? turnover*252/m.tradingDays : 0;
+    swSub = '另含重新定仓 '+reCount+' 次 · 年化换手 '+(annTurnover).toFixed(1)+' 倍';
+  }
   var cards = [
     {k:'总收益率', v:fmtPct(m.total,true), c:cls(m.total), s:'期末/期初 − 1'},
     {k:'年化收益率', v:fmtPct(m.annualized,true), c:cls(m.annualized), s:'(1+总收益)^(252/天数) − 1'},
@@ -743,7 +761,7 @@ function renderMetrics(){
     {k:'年化波动率', v:fmtPct(m.vol), c:'', s:'日收益标准差 × √252'},
     {k:'卡玛比率', v:m.calmar===null?'—':m.calmar.toFixed(3), c:'', s:'年化收益 / 最大回撤'},
     {k:'周度胜率', v:(m.weeklyWinRate*100).toFixed(1)+'%', c:'', s:m.weeks+' 个完整周'},
-    {k:'切换次数', v:String(m.switches), c:'', s:'窗口内实际切换'},
+    {k:'切换次数', v:String(m.switches), c:'', s:swSub},
     {k:'交易日数', v:String(m.tradingDays), c:'', s:bt.dates[win.i0]+' ~ '+bt.dates[win.i1]},
   ];
   document.getElementById('metricCards').innerHTML = cards.map(function(c){
