@@ -1,7 +1,8 @@
-// signal.js — ETF 动量轮动 实盘信号计算（每周四定时运行）
-// 策略: 25交易日动量最强者全仓持有; 若最强动量 < 0, 全仓转国债ETF 511260避险
+// signal.js — ETF 动量轮动 实盘信号计算（每周五定时运行）
+// 策略: 25交易日动量最强者持有; 若最强动量 < 0, 全仓转国债ETF 511260避险
+//       叠加波动率目标18%: 风险腿仓位 = min(1, 18% / 20日年化波动率), 余额持511260 (2026-09-22起, 原15%)
 // 数据: 腾讯 web.ifzq.gtimg.cn 前复权日线(历史) + qt.gtimg.cn 实时价(当日近似)
-// 状态: etf_rotation_state.json 记录策略目标持仓, 变化时输出切换建议
+// 状态: etf_rotation_state.json 记录策略目标持仓与仓位比例, 变化时输出切换/定仓建议
 // FORCE=1 环境变量可跳过"当日必须为交易日"检查(测试用)
 'use strict';
 var fs = require('fs');
@@ -14,6 +15,8 @@ var ETFS = [
   { symbol: 'sh510300', code: '510300', name: '沪深300ETF' },
 ];
 var LOOKBACK = 25, BOND = '511260';
+var VOL_TARGET = 0.18, VOL_LB = 20;   // 波动率目标与回看窗口(与 engine.js 口径一致: 样本标准差×√252)
+var REBAL_GAP = 0.05;                 // 同目标下风险腿权重漂移≥5pp才提示重新定仓
 var DIR = __dirname;
 var STATE_FILE = path.join(DIR, 'etf_rotation_state.json');
 var FORCE = process.env.FORCE === '1';
@@ -90,18 +93,47 @@ function beijingToday() {
     series.push(quotes[e.code].price);
     if (series.length < LOOKBACK + 1) throw new Error(e.code + ' 动量数据不足26个交易日');
     var mom = series[series.length - 1] / series[series.length - 1 - LOOKBACK] - 1;
-    rows.push({ code: e.code, name: e.name, price: quotes[e.code].price, momentum: mom });
+    // 20日年化波动率: 最近20个日收益的样本标准差 × √252 (与 engine.js realizedVol 同口径)
+    var vol = null;
+    if (series.length >= VOL_LB + 1) {
+      var rs = [], sd = 0, mu = 0, j;
+      for (j = series.length - VOL_LB; j < series.length; j++) rs.push(series[j] / series[j - 1] - 1);
+      rs.forEach(function (r) { mu += r; }); mu /= rs.length;
+      rs.forEach(function (r) { sd += (r - mu) * (r - mu); });
+      vol = Math.sqrt(sd / (rs.length - 1)) * Math.sqrt(252);
+    }
+    rows.push({ code: e.code, name: e.name, price: quotes[e.code].price, momentum: mom, vol: vol });
   }
 
   var best = rows.reduce(function (a, b) { return b.momentum > a.momentum ? b : a; });
-  var target = best.momentum < 0 ? BOND : best.code;
-  var riskOff = target === BOND && best.code !== BOND;
+  var riskOff = best.momentum < 0;
+  var target = riskOff ? BOND : best.code;
+
+  // 目标仓位: 目标为国债(避险或国债动量最强) → 100%国债;
+  //           目标为风险资产 → 风险腿 min(1, 18%/σ20), 余额国债 (σ缺失时按引擎口径给100%)
+  var weights = {};
+  if (target === BOND) {
+    weights[BOND] = 1;
+  } else {
+    var rl = (best.vol === null || best.vol <= 0) ? 1 : Math.min(1, VOL_TARGET / best.vol);
+    rl = Math.round(rl * 1000) / 1000;
+    weights[best.code] = rl;
+    weights[BOND] = Math.round((1 - rl) * 1000) / 1000;
+  }
+  var posStr = Object.keys(weights).sort(function (a, b) { return weights[b] - weights[a]; }).map(function (c) {
+    return ((ETFS.find(function (e) { return e.code === c; }) || {}).name || c) + ' ' + Math.round(weights[c] * 100) + '%';
+  }).join(' + ');
 
   // 读取/更新状态
   var state = { target: null, updatedAt: null, history: [] };
   try { state = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); } catch (e) { /* 首次运行 */ }
   var prevTarget = state.target;
+  var prevWeights = state.weights || null;
   var changed = prevTarget !== null && prevTarget !== target;
+  // 同目标下的仓位漂移(重新定仓): 风险腿权重变化 ≥ 5pp 才提示
+  var prevRiskW = prevWeights ? (prevWeights[target] || 0) : null;
+  var curRiskW = weights[target] || 0;
+  var rebalance = !changed && prevTarget !== null && prevRiskW !== null && Math.abs(curRiskW - prevRiskW) >= REBAL_GAP;
 
   var lines = [];
   lines.push('📡 ETF 动量轮动信号（' + dateTag + ' ' + quotes[ETFS[0].code].time.slice(8, 10) + ':' + quotes[ETFS[0].code].time.slice(10, 12) + '）');
@@ -109,18 +141,25 @@ function beijingToday() {
   rows.forEach(function (r) {
     var tag = (r.code === target) ? ' ← 目标持仓' : '';
     var ro = (r.code === BOND && riskOff) ? '（避险触发）' : '';
-    lines.push('  ' + r.name + ' ' + r.code + '  现价 ' + r.price.toFixed(3) + '  ' + LOOKBACK + '日动量 ' + (r.momentum * 100).toFixed(2) + '%' + ro + tag);
+    var volTxt = r.vol === null ? 'σ —' : 'σ ' + (r.vol * 100).toFixed(1) + '%';
+    lines.push('  ' + r.name + ' ' + r.code + '  现价 ' + r.price.toFixed(3) + '  ' + LOOKBACK + '日动量 ' + (r.momentum * 100).toFixed(2) + '%  ' + volTxt + ro + tag);
   });
   lines.push('────────────────────────');
   if (prevTarget === null) {
-    lines.push('📌 首次运行, 建立基准目标持仓: ' + target + '（无需交易, 仅供参考）');
+    lines.push('📌 首次运行, 建立基准目标持仓: ' + target + '（' + posStr + '）');
+    lines.push('   （无需交易, 仅供参考）');
   } else if (changed) {
     var prevName = (ETFS.find(function (e) { return e.code === prevTarget; }) || {}).name || prevTarget;
     var newName = (ETFS.find(function (e) { return e.code === target; }) || {}).name || target;
     lines.push('🔄 【切换建议】' + prevName + ' ' + prevTarget + ' → ' + newName + ' ' + target);
-    lines.push('   操作: 卖出全部 ' + prevName + ', 买入 ' + newName + '（收盘前完成, 收盘价成交口径）');
+    lines.push('   操作: 卖出全部 ' + prevName + ', 按比例买入 → ' + posStr + '（收盘前完成, 收盘价成交口径）');
+  } else if (rebalance) {
+    lines.push('⚖️ 【定仓建议】' + posStr + '（原 ' + Math.round(prevRiskW * 100) + '%/' + Math.round((1 - prevRiskW) * 100) + '%）');
+    lines.push('   操作: 标的不变, 按新比例调整两腿仓位（波动率漂移触发）');
+  } else if (prevWeights && prevWeights[target] === undefined && Object.keys(prevWeights).length) {
+    lines.push('⚖️ 目标持仓不变: ' + target + '，建议持仓 ' + posStr);
   } else {
-    lines.push('✅ 目标持仓不变: ' + target + '，无需操作');
+    lines.push('✅ 目标持仓不变: ' + target + '（' + posStr + '），无需操作');
   }
   if (quoteDate !== today) lines.push('⚠️ 注意: 测试模式运行, 行情日期 ' + quoteDate + ' 非今日。');
   lines.push('ℹ️ 本信号为盘中近似(以最新价代替收盘价), 尾盘动量排序可能变化; 不构成投资建议。');
@@ -128,11 +167,14 @@ function beijingToday() {
   console.log(lines.join('\n'));
 
   state.target = target;
+  state.weights = weights;
   state.updatedAt = new Date().toISOString();
   state.history.push({
     date: quoteDate, target: target, changed: changed,
-    riskOff: riskOff,
+    rebalance: rebalance, riskOff: riskOff,
     momenta: rows.reduce(function (o, r) { o[r.code] = +r.momentum.toFixed(6); return o; }, {}),
+    vols: rows.reduce(function (o, r) { o[r.code] = r.vol === null ? null : +r.vol.toFixed(6); return o; }, {}),
+    weights: weights,
   });
   if (state.history.length > 200) state.history = state.history.slice(-200);
   fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
