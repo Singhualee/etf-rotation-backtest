@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Pro 单文件构建版, 由 build_pro.py 生成于 2026-09-22 22:47 -->
+<!-- Pro 单文件构建版, 由 build_pro.py 生成于 2026-09-22 23:01 -->
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -561,7 +561,7 @@ tr.hl td{font-weight:700}
 <div class="metrics" id="metricCards"></div>
 
 <div class="card">
-  <h2>净值对比<span class="hint">以所选窗口起点重设基数 = 1 · 窗口内指标已完整重算</span></h2>
+  <h2>净值对比<span class="hint">以所选窗口起点重设基数 = 1 · 窗口内指标已完整重算 · 策略曲线上的 ▲ 为切换点，颜色=切换后的标的，悬停查看明细</span></h2>
   <div id="navChart" class="chart tall"></div>
   <div class="legendbox" id="navLegend"></div>
 </div>
@@ -1294,14 +1294,41 @@ function renderNavChart(){
   });
   series.push({name:'等权每日再平衡', data:windowSeries(bt.equalNav), color:EQ_COLOR, w:1.5, dash:[6,4]});
   series.push({name:'等权5%带宽再平衡', data:windowSeries(bt.bandEqualNav), color:BAND_COLOR, w:1.5, dash:[2,3]});
+  // 切换点标记: ▲ 画在策略曲线上, 颜色=切换后标的
+  var dateIdx = {};
+  for(var di=0; di<bt.dates.length; di++) dateIdx[bt.dates[di]] = di;
+  var navMarks = bt.switches.filter(function(s){
+    return s.from!==null && s.from!==s.to && s.date>=bt.dates[win.i0] && s.date<=bt.dates[win.i1] && dateIdx[s.date]!==undefined;
+  });
+  var markData = navMarks.map(function(s){
+    var i = dateIdx[s.date];
+    return {value:[ts(s.date), bt.nav[i]/bt.nav[win.i0]], itemStyle:{color:COLORS[etfs[s.to].code], borderColor:'#fff', borderWidth:0.8}, switchRef:s};
+  });
+  series.push({name:'切换点', marks:markData});
   var log = document.getElementById('logChk').checked;
   chart.setOption({
     animation:false, legend:{top:0,textStyle:{fontSize:12}},
-    tooltip:{trigger:'axis',valueFormatter:function(v){return v.toFixed(4)}},
+    tooltip:{trigger:'axis', formatter:function(params){
+      var t = params && params.length ? params[0].axisValue : '';
+      var head = (typeof t==='number' ? echarts.time.format(t,'{yyyy}-{MM}-{dd}') : t);
+      var html = '<div style="font-weight:500;margin-bottom:2px">'+head+'</div>';
+      params.forEach(function(p){
+        if(p.seriesName==='切换点'){
+          var s = p.data.switchRef;
+          html += '<div style="margin-top:2px">▲ 切换: '+etfs[s.from].label+' <b>→</b> <span style="color:'+COLORS[etfs[s.to].code]+';font-weight:500">'+etfs[s.to].label+' '+etfs[s.to].code+'</span>'+(s.riskOff?'（避险）':'')+'<br><span style="color:#8a93a0">'+s.date+' 收盘决策，次日起生效</span></div>';
+        } else {
+          var v = Array.isArray(p.value)? p.value[1] : p.value;
+          html += '<div>'+p.marker+p.seriesName+' '+(isNaN(v)?'—':(+v).toFixed(4))+'</div>';
+        }
+      });
+      return html;
+    }},
     grid:{top:36,left:12,right:16,bottom:12,containLabel:true},
     xAxis:{type:'time'},
     yAxis:{type: log?'log':'value', scale:true, axisLabel:{formatter:function(v){return (+v).toFixed(log?1:2)}}},
     series: series.map(function(s){
+      if(s.marks) return {name:s.name, type:'scatter', symbol:'triangle', symbolSize:10, data:s.marks,
+        itemStyle:{borderColor:'#fff', borderWidth:0.8}, z:12, silent:false};
       return {name:s.name,type:'line',showSymbol:false,data:s.data,lineStyle:{width:s.w,color:s.color,type:s.dash?'dashed':'solid'},
         itemStyle:{color:s.color},emphasis:{focus:'series'}};
     })
