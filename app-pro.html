@@ -105,6 +105,7 @@ tr.hl td{font-weight:700}
         <option value="0">0%</option><option value="0.001" selected>0.1%</option>
       </select>
     </label>
+    <label class="rf" title="回测起点前移到2013年: 用518880华安黄金ETF(2013-07起)前接黄金518850、用511010五年国债ETF(2013-03起)前接国债511260, 拼接点按重叠日对齐比例, 数值连续。仅延长回测窗口, 拼接前段收益为替代标的自身收益"><input type="checkbox" id="extChk">长历史(2013起)</label>
   </div>
 </div>
 
@@ -201,7 +202,45 @@ function stratTag(){
   return wd+'调仓/'+document.getElementById('lbSel').value+'日动量'+
     (vol>0?'/波动目标'+(vol*100)+'%':'')+
     (document.getElementById('riskOffChk').checked?'/避险':'')+
-    (+document.getElementById('costSel').value>0?'/含成本0.1%':'/零成本');
+    (+document.getElementById('costSel').value>0?'/含成本0.1%':'/零成本')+
+    (document.getElementById('extChk').checked?'/长历史':'');
+}
+// ---- 长历史模式: 用替代标的(518880/511010)前接黄金与国债序列, 回测起点前移至2013 ----
+var origSeries = null;   // 原始四条序列备份(关闭长历史时恢复)
+function applyExtended(on){
+  if(!ETF_DATA.extended || !ETF_DATA.extended.gold || !ETF_DATA.extended.bond) return false;
+  if(on){
+    if(!origSeries) origSeries = etfs.map(function(e){ return {dates:e.dates, closes:e.closes}; });
+    [{code:'518850', ext:ETF_DATA.extended.gold},{code:'511260', ext:ETF_DATA.extended.bond}].forEach(function(pair){
+      var e = etfs.filter(function(x){return x.code===pair.code;})[0];
+      if(!e || e._extApplied) return;
+      var sub = pair.ext;
+      // 对齐比例: 替代序列在原序列首日(或其前最近一日)的收盘 缩放到 原首日收盘 → 拼接点数值连续
+      var ref = null;
+      for(var i = sub.dates.length - 1; i >= 0; i--){
+        if(sub.dates[i] <= e.dates[0]){ ref = sub.closes[i]; break; }
+      }
+      if(!ref) return;
+      var f = e.closes[0] / ref;
+      var pd = [], pc = [];
+      for(var j = 0; j < sub.dates.length; j++){
+        if(sub.dates[j] < e.dates[0]){ pd.push(sub.dates[j]); pc.push(sub.closes[j] * f); }
+      }
+      if(!pd.length) return;
+      e.dates = pd.concat(e.dates);
+      e.closes = pc.concat(e.closes);
+      e._extApplied = true;
+    });
+    return true;
+  } else if(origSeries){
+    etfs.forEach(function(e, k){
+      var o = origSeries[k];
+      if(o){ e.dates = o.dates; e.closes = o.closes; }
+      e._extApplied = false;
+    });
+    return true;
+  }
+  return false;
 }
 var bt = RotationEngine.runBacktest(etfs, stratOpts());
 var yearly = RotationEngine.yearlyReturns(bt);
@@ -421,6 +460,8 @@ function buildUpdatedHtml(){
   };
   var idx = DATA_SCRIPT_TEXT.indexOf('var ETF_DATA');
   var updatedScript = DATA_SCRIPT_TEXT.slice(0, idx) + 'var ETF_DATA = ' + JSON.stringify(payload) + ';';
+  // 保留长历史替代数据(保存副本后仍可开启"长历史(2013起)")
+  if (ETF_DATA.extended) updatedScript += '\nETF_DATA.extended = ' + JSON.stringify(ETF_DATA.extended) + ';';
   var html = PAGE_SOURCE.replace(DATA_SCRIPT_TEXT, updatedScript);
   window.__lastSavedHtml = html;   // 测试钩子
   return html;
@@ -536,9 +577,13 @@ document.getElementById('btnRefresh').onclick = async function(){
       var divNotes=[];
       for(var k=0;k<etfs.length;k++){
         etfs[k].dates=results[k].dates; etfs[k].closes=results[k].closes;
+        etfs[k]._extApplied=false;
         if(results[k].dividends && results[k].dividends.length) etfs[k].dividends=results[k].dividends;
         if(results[k].divNote) divNotes.push(results[k].divNote);
       }
+      // 刷新数据覆盖了序列: 长历史拼接失效, 自动关闭并重置备份
+      origSeries=null;
+      document.getElementById('extChk').checked=false;
       var divmap={};
       etfs.forEach(function(e){ divmap[e.code]=e.dividends||(ETF_DATA.dividends&&ETF_DATA.dividends[e.code])||[]; });
       ETF_DATA.dividends=divmap;
@@ -696,7 +741,26 @@ function updateStrategyNote(){
     (vol>0
       ?'波动率目标<b>'+ (vol*100) +'%</b>开启：每个调仓日按持有 ETF 过去 20 个交易日实际波动率定仓——风险腿仓位 = min(100%, 目标波动率÷实际波动率)，余额持有 511260 国债ETF（实际波动率低于目标时满仓，不加杠杆）。'
       :'波动率目标<b>关闭</b>：全仓持有单一 ETF。')+
-    '换手按实际权重变动计费，每次 <b>'+(cost>0?(cost*100).toFixed(1)+'%':'0（不计成本）')+'</b> 扣减净值（建仓与"决定不切换"不产生交易成本）。';
+    '换手按实际权重变动计费，每次 <b>'+(cost>0?(cost*100).toFixed(1)+'%':'0（不计成本）')+'</b> 扣减净值（建仓与"决定不切换"不产生交易成本）。'+
+    (document.getElementById('extChk').checked
+      ?'<span style="color:#b45309">长历史模式：黄金518850以518880华安黄金ETF(2013-07起)前接、国债511260以511010五年国债ETF(2013-03起)前接，拼接点已对齐、数值连续；拼接前段收益为替代标的自身收益，避险腿久期略有差异(5年vs10年)。</span>'
+      :'');
+}
+function rerunStrategy(){
+  try {
+    bt = RotationEngine.runBacktest(etfs, stratOpts());
+  } catch (e) {
+    document.getElementById('stratNote').innerHTML = '<span style="color:#c0392b">参数组合无效: ' + e.message + '</span>';
+    return false;
+  }
+  yearly = RotationEngine.yearlyReturns(bt);
+  rebuildTimeSelectors();
+  setCustomBounds();
+  win = {i0:0, i1:bt.nav.length-1};
+  markActive('all');
+  updateStrategyNote();
+  renderAll(); renderYearChart(); updateSubtitle();
+  return true;
 }
 ['wdSel','lbSel','riskOffChk','costSel','volSel'].forEach(function(id){
   document.getElementById(id).onchange = function(){
@@ -705,21 +769,17 @@ function updateStrategyNote(){
     var roChk = document.getElementById('riskOffChk');
     if (volOn) { roChk.checked = true; roChk.disabled = true; }
     else { roChk.disabled = false; }
-    try {
-      bt = RotationEngine.runBacktest(etfs, stratOpts());
-    } catch (e) {
-      document.getElementById('stratNote').innerHTML = '<span style="color:#c0392b">参数组合无效: ' + e.message + '</span>';
-      return;
-    }
-    yearly = RotationEngine.yearlyReturns(bt);
-    rebuildTimeSelectors();
-    setCustomBounds();
-    win = {i0:0, i1:bt.nav.length-1};
-    markActive('all');
-    updateStrategyNote();
-    renderAll(); renderYearChart(); updateSubtitle();
+    rerunStrategy();
   };
 });
+document.getElementById('extChk').onchange = function(){
+  if(!applyExtended(this.checked)){
+    this.checked = false;
+    document.getElementById('stratNote').innerHTML = '<span style="color:#c0392b">长历史数据不可用（缺 ETF_DATA.extended）</span>';
+    return;
+  }
+  if(!rerunStrategy()){ applyExtended(false); rerunStrategy(); }
+};
 // 初始加载也执行一次避险锁定(默认波动率目标18%已选中)
 (function(){
   var volOn0 = +document.getElementById('volSel').value > 0;
