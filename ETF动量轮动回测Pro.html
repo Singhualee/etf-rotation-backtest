@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Pro 单文件构建版, 由 build_pro.py 生成于 2026-09-22 23:01 -->
+<!-- Pro 单文件构建版, 由 build_pro.py 生成于 2026-09-26 10:47 -->
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -587,7 +587,7 @@ tr.hl td{font-weight:700}
 </div>
 
 <div class="card">
-  <h2>切换记录<span class="hint">窗口内全部调仓决策（含建仓与未换标的的重新定仓）· 调仓后持仓=该日收盘决策的完整组合，次日起生效 · 右侧四列上行=当日25日动量（红绿），下行=20日年化波动率σ（蓝色；深蓝加粗=σ超过波动目标，风险腿仓位被压缩）</span></h2>
+  <h2>切换记录<span class="hint">窗口内全部调仓决策（含建仓与未换标的的重新定仓）· 调仓后持仓=该日收盘决策的完整组合，次日起生效 · 期间收益=本次决策生效至下次调仓收盘的策略净值涨跌（含退出切换成本），最末一行截至窗口末 · 右侧四列上行=当日25日动量（红绿），下行=20日年化波动率σ（蓝色；深蓝加粗=σ超过波动目标，风险腿仓位被压缩）</span></h2>
   <div class="scroll"><table id="swTable"></table></div>
 </div>
 
@@ -1458,10 +1458,13 @@ function renderSwTable(){
   // 全部调仓日决策(含建仓与未换标的的重新定仓), 无 rebalances 的旧构建退回 switches
   var events = bt.rebalances || bt.switches;
   var rows = events.filter(function(s){return s.date>=d0 && s.date<=d1;});
+  // 日期→窗口内nav索引映射, 用于计算每次决策的"期间收益率"
+  var dIdx={}; for(var wi=win.i0;wi<=win.i1;wi++) dIdx[bt.dates[wi]]=wi;
   var vt = +document.getElementById('volSel').value || 0;   // 当前波动目标(0=关闭, 不做σ高亮)
-  var html = '<tr><th>日期</th><th>操作</th><th>调仓后持仓</th>'
+  var html = '<tr><th>日期</th><th>操作</th><th>调仓后持仓</th><th>期间收益<br><span style="font-weight:400;font-size:11px;color:var(--muted)">至下次调仓</span></th>'
     + etfs.map(function(e){return '<th>'+e.label+'<br>'+e.code+'<br><span style="font-weight:400;font-size:11px;color:var(--muted)">动量 / 20日σ</span></th>';}).join('')+'</tr>';
-  rows.slice().reverse().forEach(function(s){
+  var rev = rows.slice().reverse();
+  rev.forEach(function(s,ri){
     var dir;
     if (s.from===null) {
       dir = '<span class="tag" style="background:#8a93a0">建仓</span> → '+etfs[s.to].label;
@@ -1479,7 +1482,13 @@ function renderSwTable(){
     } else {
       pos = etfs[s.to].label+' 100%';
     }
+    // 期间收益率: 本次决策日收盘 → 下次调仓日收盘的策略净值涨跌(窗口末截断), 含下次调仓日的退出切换成本
+    var idx0 = dIdx[s.date];
+    var nextEv = ri>0 ? rev[ri-1] : null;
+    var idx1 = nextEv ? (dIdx[nextEv.date]!==undefined ? dIdx[nextEv.date] : win.i1) : win.i1;
+    var per = (idx0!==undefined && idx1>idx0) ? bt.nav[idx1]/bt.nav[idx0]-1 : null;
     html += '<tr><td>'+s.date+'</td><td>'+dir+'</td><td style="white-space:nowrap">'+pos+'</td>'
+      + '<td class="'+(per===null?'':cls(per))+'"'+(per!==null?' style="font-weight:600"':'')+'>'+(per===null?'—':fmtPct(per,true))+'</td>'
       + etfs.map(function(e,k){
           var m=s.momenta[e.code];
           var best = etfs.every(function(e2){ return m>= (s.momenta[e2.code]===null?-Infinity:s.momenta[e2.code]); });
