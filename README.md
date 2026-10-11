@@ -256,7 +256,7 @@ node stress-test-pro.js
 
 **跑什么（按顺序）**：
 
-1. `npm install` —— 装唯一依赖 jsdom
+1. `npm ci` —— 装唯一依赖 jsdom
 2. `build_pro.py` + `ci_check_build.py` —— 用源码重建单文件页，并**校验产物与仓库里已提交的版本一致**（比对时忽略那一行构建时间戳）。改了 `app-pro.html` / `engine.js` / `data.js` 却忘记重建产物的话，这一步会直接拦下
 3. `run_engine.js` + `verify.py` —— JS 引擎与 Python 独立实现交叉验证
 4. `smoke-test-pro.js` / `audit-harness-pro.js` / `audit-engine.js` / `smoke-test.js` —— 四套断言
