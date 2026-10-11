@@ -1,5 +1,7 @@
 # ETF 动量轮动策略回测
 
+[![tests](https://github.com/Singhualee/etf-rotation-backtest/actions/workflows/test.yml/badge.svg)](https://github.com/Singhualee/etf-rotation-backtest/actions/workflows/test.yml)
+
 在四只 ETF 的真实历史前复权日线上，完整重放一套「动量轮动 + 波动率目标 + 绝对动量避险」策略，并以**单文件网页**的形式展示回测结果。
 
 交付物就是一个 HTML 文件 —— 双击用浏览器打开即可，**不需要服务器、不需要装依赖、断网也能用**（ECharts 与行情数据都已内联）。
