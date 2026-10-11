@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """build_pro.py — 把 echarts.min.js / data.js / engine.js 内联进 app-pro.html,
-生成新策略(周四调仓+25日动量+避险)的单文件交付版"""
+生成 Pro 版的单文件交付物。
+
+Pro 页面默认档位: 周五调仓 + 25 日动量 + 波动率目标 18% + 避险开启 + 成本 0.1%
+(参数由页面控件读取, 此处只是说明默认值; 改动须与 需求规格说明书.md §8.2 及
+ make_smoke_pro.py 里的 PRO_OPTS 保持一致, 否则测试期望值会与页面默认不符)"""
 import datetime as dt
 
 DIR = "/Users/admin/WorkBuddy/dongliang/etf-rotation-backtest"

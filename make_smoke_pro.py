@@ -38,7 +38,7 @@ const __proSetup = new Function('fs', 'dir',
   'eval(fs.readFileSync(dir + "/data.js", "utf8"));' +
   'return { RotationEngine: RotationEngine, ETF_DATA: ETF_DATA };');
 const { RotationEngine, ETF_DATA } = __proSetup(fs, __dirname);
-const PRO_OPTS = {lookback:25, rebalanceWeekday:4, volTarget:0.15, costRate:0.001, riskOff:{floor:0, bondCode:'511260'}};
+const PRO_OPTS = {lookback:25, rebalanceWeekday:4, volTarget:0.18, costRate:0.001, riskOff:{floor:0, bondCode:'511260'}};
 const EXPbt = RotationEngine.runBacktest(ETF_DATA.etfs, PRO_OPTS);
 const EXPm = RotationEngine.computeMetrics(EXPbt, {rf:0.02});
 const fmtSigned = x => (x>=0?'+':'') + (x*100).toFixed(2) + '%';
