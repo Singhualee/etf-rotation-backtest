@@ -3,7 +3,7 @@
 // 无溃疡/马丁), 会静默测错产物并产生约 20 项假 FAIL, 末尾还会因 __rotationAuto 缺失而崩溃。
 const { JSDOM } = require('jsdom');
 const fs = require('fs');
-const path = process.argv[2] || '/Users/admin/WorkBuddy/dongliang/etf-rotation-backtest/ETF动量轮动回测Pro.html';
+const path = process.argv[2] || __dirname + '/ETF动量轮动回测Pro.html';
 const html = fs.readFileSync(path, 'utf-8');
 
 // ---- Pro 版: 期望值与页面同引擎同参数动态计算, 不再硬编码 ----
@@ -143,7 +143,7 @@ setTimeout(async () => {
   check('2022年交易日数在[230,250]', (() => { const n = +cards2022['交易日数']; return n>=230 && n<=250; })(),
     cards2022['交易日数']);
   // 2022年动量策略表现: 与engine_result.json独立值比对
-  const er = JSON.parse(fs.readFileSync('/Users/admin/WorkBuddy/dongliang/etf-rotation-backtest/engine_result.json','utf-8'));
+  const er = JSON.parse(fs.readFileSync(__dirname + '/engine_result.json','utf-8'));
   const i0 = er.firstDate <= '2022-01-01' ? er.dates ? 0 : 0 : 0; // dates不在engine_result中, 用下方方式
   check('2022年窗口切换记录表行数(表头+若干)', document.querySelectorAll('#swTable tr').length >= 2,
     document.querySelectorAll('#swTable tr').length);

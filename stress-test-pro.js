@@ -1,9 +1,9 @@
 // stress-test-pro.js — 极限参数矩阵压力测试: 160种组合逐一切换, 断言零崩溃零NaN零状态漂移
 const { JSDOM } = require('jsdom');
 const fs = require('fs');
-const path = process.argv[2] || '/Users/admin/WorkBuddy/dongliang/etf-rotation-backtest/ETF动量轮动回测Pro.html';
+const path = process.argv[2] || __dirname + '/ETF动量轮动回测Pro.html';
 const html = fs.readFileSync(path, 'utf-8');
-const DIR = '/Users/admin/WorkBuddy/dongliang/etf-rotation-backtest';
+const DIR = __dirname;   // 不写死绝对路径, 以便在 CI/其他机器上运行
 const loadEngine = new Function('fs', 'DIR',
   'eval(fs.readFileSync(DIR + "/engine.js", "utf8"));' +
   'eval(fs.readFileSync(DIR + "/data.js", "utf8"));' +

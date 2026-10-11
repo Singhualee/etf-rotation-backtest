@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """build.py — 把 echarts.min.js / data.js / engine.js 内联进 app.html, 生成单文件交付版"""
+import os
 import re
 import datetime as dt
 
-DIR = "/Users/admin/WorkBuddy/dongliang/etf-rotation-backtest"
+# 脚本自身所在目录: 不写死绝对路径, 便于在 CI/其他机器上直接运行
+DIR = os.path.dirname(os.path.abspath(__file__))
 OUT = f"{DIR}/ETF动量轮动回测.html"
 
 

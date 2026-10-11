@@ -1,0 +1,60 @@
+name: tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  headless-tests:
+    name: 无头测试套件
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 准备 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.2'   # jsdom@30 要求 ^22.22.2, 不能只写 '22'
+          check-latest: true
+
+      - name: 准备 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 安装依赖 (jsdom)
+        run: npm ci --no-audit --no-fund
+
+      - name: 重建单文件页, 并校验产物与源码一致
+        run: |
+          python3 build_pro.py
+          python3 ci_check_build.py
+
+      - name: 生成引擎结果, 并用 Python 独立实现交叉验证
+        run: |
+          node run_engine.js
+          python3 verify.py
+
+      - name: 冒烟测试 (smoke-test-pro)
+        run: node smoke-test-pro.js
+
+      - name: UI 层对抗审查 (audit-harness-pro)
+        run: node audit-harness-pro.js
+
+      - name: 引擎级审查 (audit-engine)
+        run: node audit-engine.js
+
+      - name: 旧页回归 (smoke-test)
+        run: node smoke-test.js
+
+      - name: 压力测试 (160 组参数, 内存敏感)
+        run: node --max-old-space-size=4096 stress-test-pro.js

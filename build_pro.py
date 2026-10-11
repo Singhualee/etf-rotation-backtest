@@ -5,9 +5,11 @@
 Pro 页面默认档位: 周五调仓 + 25 日动量 + 波动率目标 18% + 避险开启 + 成本 0.1%
 (参数由页面控件读取, 此处只是说明默认值; 改动须与 需求规格说明书.md §8.2 及
  make_smoke_pro.py 里的 PRO_OPTS 保持一致, 否则测试期望值会与页面默认不符)"""
+import os
 import datetime as dt
 
-DIR = "/Users/admin/WorkBuddy/dongliang/etf-rotation-backtest"
+# 脚本自身所在目录: 不写死绝对路径, 便于在 CI/其他机器上直接运行
+DIR = os.path.dirname(os.path.abspath(__file__))
 SRC = "app-pro.html"
 OUT = f"{DIR}/ETF动量轮动回测Pro.html"
 

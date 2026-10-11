@@ -5,10 +5,12 @@
 """
 import json
 import math
+import os
 import datetime as dt
 from collections import defaultdict
 
-DIR = "/Users/admin/WorkBuddy/dongliang/etf-rotation-backtest"
+# 脚本自身所在目录: 不写死绝对路径, 以便在 CI/其他机器上直接运行
+DIR = os.path.dirname(os.path.abspath(__file__))
 LOOKBACK = 20
 RF = 0.02
 

@@ -3,7 +3,7 @@
 // 2) 不变量: primaryW/holding/nav/switches 结构与取值
 // 3) 独立复算器: 从策略规则从零实现, 与引擎在真实数据上逐项对照
 const fs = require('fs');
-const DIR = '/Users/admin/WorkBuddy/dongliang/etf-rotation-backtest';
+const DIR = __dirname;   // 不写死绝对路径, 以便在 CI/其他机器上运行
 eval(fs.readFileSync(DIR + '/engine.js', 'utf8'));
 eval(fs.readFileSync(DIR + '/data.js', 'utf8'));
 

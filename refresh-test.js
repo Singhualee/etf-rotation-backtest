@@ -2,7 +2,7 @@
 const { JSDOM } = require('jsdom');
 const fs = require('fs');
 const https = require('https');
-const path = process.argv[2] || '/Users/admin/WorkBuddy/dongliang/etf-rotation-backtest/ETF动量轮动回测.html';
+const path = process.argv[2] || __dirname + '/ETF动量轮动回测.html';
 const html = fs.readFileSync(path, 'utf-8');
 
 let pass = 0, fail = 0;

@@ -18,6 +18,7 @@
 - [项目结构](#项目结构)
 - [开发流程](#开发流程)
 - [测试与验证](#测试与验证)
+- [持续集成（CI）](#持续集成ci)
 - [数据来源与更新](#数据来源与更新)
 - [动手前必读的坑](#动手前必读的坑)
 - [文档](#文档)
@@ -158,6 +159,15 @@ open "ETF动量轮动回测Pro.html"        # macOS
 | `smoke-test.js` | 旧版页面的冒烟测试（50 项） |
 | `refresh-test.js` | 刷新功能的真实网络端到端测试 |
 | `make_smoke_pro.py` | 从 `smoke-test.js` 生成 `smoke-test-pro.js`。⚠️ 它是**全量重写**，会抹掉直接写在 Pro 版里的用例，不要随手运行 |
+| `ci_check_build.py` | 校验"重建的产物"与"已提交的产物"是否一致（防忘记重建），比对时忽略构建时间戳 |
+
+### 持续集成
+
+| 文件 | 说明 |
+|---|---|
+| `.github/workflows/test.yml` | GitHub Actions 工作流：push 到 main / PR 时自动跑完整测试链 |
+| `package.json` | 只声明测试依赖（jsdom）与几个常用脚本入口 |
+| `ci_check_build.py` | 产物一致性校验（见「持续集成」一节） |
 
 ### 研究脚本（一次性分析，非交付链路）
 
@@ -212,7 +222,7 @@ node stress-test-pro.js
 ### 运行环境
 
 - Node.js（jsdom 是唯一测试依赖）+ Python 3
-- ⚠️ 脚本里**硬编码了绝对路径**（`DIR = "/Users/admin/WorkBuddy/dongliang/etf-rotation-backtest"`），换机器需要改这个常量
+- 各脚本一律用 `__dirname`（Node）/ `os.path.dirname(__file__)`（Python）取**自身所在目录**，不依赖当前工作目录 —— 可以从任意位置调用，也能直接在 CI 上跑
 - ⚠️ 测试用 jsdom 加载 1.4MB 单文件页，**内存占用不低**：在 8GB 机器上并发跑极易被系统 OOM kill（退出码 137、无任何输出）。对策：**一次只跑一套**，用 `> /tmp/x.txt 2>&1` 重定向而不是管道，长任务放后台
 
 ---
@@ -237,6 +247,32 @@ node stress-test-pro.js
 
 2. **写完务必注入故障反向验证。**
    断言必须写**不变量**而非"就是第 X 条"（合成坐标系里像素点未必落在预期的那条上）。改完测试后，故意把修复拆掉，确认用例**会红**，否则等于没测。悬停功能就是用这个方法收敛的：注入 3 种故障，其中"只在判定变化时才派发"这一类**只有沿曲线横向拖动的用例能咬住**。
+
+---
+
+## 持续集成（CI）
+
+`.github/workflows/test.yml` 会在每次 push 到 `main`、以及每个 PR 时自动跑完整测试链，不需要本地环境。
+
+**跑什么（按顺序）**：
+
+1. `npm install` —— 装唯一依赖 jsdom
+2. `build_pro.py` + `ci_check_build.py` —— 用源码重建单文件页，并**校验产物与仓库里已提交的版本一致**（比对时忽略那一行构建时间戳）。改了 `app-pro.html` / `engine.js` / `data.js` 却忘记重建产物的话，这一步会直接拦下
+3. `run_engine.js` + `verify.py` —— JS 引擎与 Python 独立实现交叉验证
+4. `smoke-test-pro.js` / `audit-harness-pro.js` / `audit-engine.js` / `smoke-test.js` —— 四套断言
+5. `stress-test-pro.js` —— 160 组参数全量重算
+
+**本地等价命令**：
+
+```bash
+npm ci               # 只装 jsdom（按 lock 复现，与 CI 完全一致）
+npm run check:build  # 重建 + 产物一致性校验
+npm run verify       # 生成引擎结果 + Python 交叉验证
+npm test             # 三套主测试
+npm run test:stress  # 压力测试（内存敏感，单独跑）
+```
+
+> 公开仓库的 Actions 完全免费、不限量。首次推送后可在仓库的 **Actions** 标签页看运行结果（绿勾 / 红叉）。
 
 ---
 

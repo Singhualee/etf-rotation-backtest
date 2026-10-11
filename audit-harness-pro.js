@@ -2,9 +2,9 @@
 // 原则: 只通过 DOM 与 W.bt 驱动/观察, 测真实用户路径; 断言有物理意义
 const { JSDOM } = require('jsdom');
 const fs = require('fs');
-const path = process.argv[2] || '/Users/admin/WorkBuddy/dongliang/etf-rotation-backtest/ETF动量轮动回测Pro.html';
+const path = process.argv[2] || __dirname + '/ETF动量轮动回测Pro.html';
 const html = fs.readFileSync(path, 'utf-8');
-const DIR = '/Users/admin/WorkBuddy/dongliang/etf-rotation-backtest';
+const DIR = __dirname;   // 不写死绝对路径, 以便在 CI/其他机器上运行
 const loadEngine = new Function('fs', 'DIR',
   'eval(fs.readFileSync(DIR + "/engine.js", "utf8"));' +
   'eval(fs.readFileSync(DIR + "/data.js", "utf8"));' +

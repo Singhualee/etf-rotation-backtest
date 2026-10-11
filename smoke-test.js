@@ -1,7 +1,8 @@
 // smoke-test.js — ETF动量轮动回测.html 无头冒烟测试 (jsdom)
 const { JSDOM } = require('jsdom');
 const fs = require('fs');
-const path = process.argv[2] || '/Users/admin/WorkBuddy/dongliang/etf-rotation-backtest/ETF动量轮动回测.html';
+// 目标页面默认取脚本同目录(__dirname), 不写死绝对路径, 以便在 CI/其他机器上直接运行
+const path = process.argv[2] || __dirname + '/ETF动量轮动回测.html';
 const html = fs.readFileSync(path, 'utf-8');
 
 // mock 数据的"最近交易日"随真实日期变化(站点刷新取到"今天"为止的最近工作日),
@@ -97,7 +98,7 @@ setTimeout(async () => {
   check('2022年交易日数在[230,250]', (() => { const n = +cards2022['交易日数']; return n>=230 && n<=250; })(),
     cards2022['交易日数']);
   // 2022年动量策略表现: 与engine_result.json独立值比对
-  const er = JSON.parse(fs.readFileSync('/Users/admin/WorkBuddy/dongliang/etf-rotation-backtest/engine_result.json','utf-8'));
+  const er = JSON.parse(fs.readFileSync(__dirname + '/engine_result.json','utf-8'));
   const i0 = er.firstDate <= '2022-01-01' ? er.dates ? 0 : 0 : 0; // dates不在engine_result中, 用下方方式
   check('2022年窗口切换记录表行数(表头+若干)', document.querySelectorAll('#swTable tr').length >= 2,
     document.querySelectorAll('#swTable tr').length);

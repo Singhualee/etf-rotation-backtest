@@ -1,0 +1,22 @@
+{
+  "name": "etf-rotation-backtest",
+  "version": "2.0.0",
+  "private": true,
+  "description": "ETF 动量轮动策略回测 — 单文件交付页 + 无头测试套件 + Python 独立实现交叉验证",
+  "scripts": {
+    "build": "python3 build_pro.py",
+    "check:build": "python3 build_pro.py && python3 ci_check_build.py",
+    "verify": "node run_engine.js && python3 verify.py",
+    "test:smoke": "node smoke-test-pro.js",
+    "test:ui": "node audit-harness-pro.js",
+    "test:engine": "node audit-engine.js",
+    "test:stress": "node --max-old-space-size=4096 stress-test-pro.js",
+    "test": "node smoke-test-pro.js && node audit-harness-pro.js && node audit-engine.js"
+  },
+  "devDependencies": {
+    "jsdom": "^30.0.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

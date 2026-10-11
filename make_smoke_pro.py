@@ -9,15 +9,17 @@
    运行前先 `git diff --stat smoke-test-pro.js` 确认没有仅存在于 Pro 版的新增用例,
    或先把新增用例补进 smoke-test.js 再生成。
 """
+import os
 import re
 
-DIR = "/Users/admin/WorkBuddy/dongliang/etf-rotation-backtest"
+DIR = os.path.dirname(os.path.abspath(__file__))   # 脚本自身目录, 不写死绝对路径
 src = open(f"{DIR}/smoke-test.js", encoding="utf-8").read()
 
 # 0. 默认目标页面改为 Pro 单文件版
 #    (否则漏传 argv[2] 时会静默测非 Pro 页, 产生约 20 项假 FAIL)
-_old_path = "const path = process.argv[2] || '" + DIR + "/ETF动量轮动回测.html';"
-_new_path = "const path = process.argv[2] || '" + DIR + "/ETF动量轮动回测Pro.html';"
+#    基底 smoke-test.js 现在用 __dirname 取同目录页面, 这里只需换文件名
+_old_path = "const path = process.argv[2] || __dirname + '/ETF动量轮动回测.html';"
+_new_path = "const path = process.argv[2] || __dirname + '/ETF动量轮动回测Pro.html';"
 assert _old_path in src, "未找到默认页面路径"
 src = src.replace(_old_path, _new_path, 1)
 src = src.replace(

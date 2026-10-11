@@ -3,6 +3,7 @@
 数据源: 腾讯行情接口 (web.ifzq.gtimg.cn, qfq 前复权, 单次最多640行, 按结束日期分页回溯)
 """
 import json
+import os
 import time
 import datetime
 import subprocess
@@ -15,7 +16,8 @@ ETFS = [
 ]
 
 PAGE = 640
-OUT = "/Users/admin/WorkBuddy/dongliang/etf-rotation-backtest/data.js"
+# 脚本自身目录: 不写死绝对路径, 便于在 CI/其他机器上直接运行
+OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data.js")
 
 
 def curl(url):
