@@ -1,11 +1,31 @@
 #!/usr/bin/env python3
 """make_smoke_pro.py — 从 smoke-test.js 生成 smoke-test-pro.js:
-把旧策略(周五/20日)的硬编码预期值替换为按 Pro 参数(周五/25日/波动率目标15%/避险/0.1%成本)
-用同一引擎动态计算的期望值"""
+把旧策略(周五/20日)的硬编码预期值替换为按 Pro 参数(周五/25日/波动率目标18%/避险/0.1%成本)
+用同一引擎动态计算的期望值
+
+⚠️ 慎用: 本脚本是「全量重写」smoke-test-pro.js —— 它会用 smoke-test.js 作为基底重建,
+   凡是直接写在 smoke-test-pro.js 里、而 smoke-test.js 没有的用例都会被抹掉
+   (例如「打开时自动更新」12 项、「净值图悬停明细只列该条」9 项)。
+   运行前先 `git diff --stat smoke-test-pro.js` 确认没有仅存在于 Pro 版的新增用例,
+   或先把新增用例补进 smoke-test.js 再生成。
+"""
 import re
 
 DIR = "/Users/admin/WorkBuddy/dongliang/etf-rotation-backtest"
 src = open(f"{DIR}/smoke-test.js", encoding="utf-8").read()
+
+# 0. 默认目标页面改为 Pro 单文件版
+#    (否则漏传 argv[2] 时会静默测非 Pro 页, 产生约 20 项假 FAIL)
+_old_path = "const path = process.argv[2] || '" + DIR + "/ETF动量轮动回测.html';"
+_new_path = "const path = process.argv[2] || '" + DIR + "/ETF动量轮动回测Pro.html';"
+assert _old_path in src, "未找到默认页面路径"
+src = src.replace(_old_path, _new_path, 1)
+src = src.replace(
+    "// smoke-test.js — ETF动量轮动回测.html 无头冒烟测试 (jsdom)",
+    "// smoke-test-pro.js — ETF动量轮动回测Pro.html 无头冒烟测试 (jsdom)\n"
+    "// 默认目标必须是 Pro 单文件版: 若默认落到非 Pro 页, 会静默测错产物并崩溃。",
+    1,
+)
 
 # 1. 注入动态期望值计算(在读取 html 之后)
 inject_after = "const html = fs.readFileSync(path, 'utf-8');"
@@ -88,24 +108,27 @@ old = "return c5['总收益率'] === '+270.04%';"
 new = "return c5['总收益率'] === EXP.total;"
 assert old in src; src = src.replace(old, new, 1)
 
-# 8. mock 数据"最近交易日"随真实日期变化, 三处硬编码 2026-09-18 改为动态计算
-#    (mock 生成工作日序列, 站点刷新取到"今天"为止的最近工作日)
-inject_end = """const fmtLocalDate = d => d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+# 8. mock 数据"最近交易日"随真实日期变化 -> 硬编码日期一律改为动态计算
+#    幂等: smoke-test.js 若已自带 fmtLocalDate/EXPmockEnd (已在源头修好), 本步自动跳过, 不重复声明 const
+if "EXPmockEnd" in src:
+    pass
+else:
+    inject_end = """const fmtLocalDate = d => d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
 const EXPmockEnd = (() => { const d = new Date(); while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() - 1); return fmtLocalDate(d); })();"""
-anchor2 = "const fmtSigned = x => (x>=0?'+':'') + (x*100).toFixed(2) + '%';"
-assert anchor2 in src
-src = src.replace(anchor2, inject_end + "\n" + anchor2, 1)
-pairs = [
-  ("check('刷新后副标题数据截至为最近交易日2026-09-18',\n    document.getElementById('subtitle').textContent.includes('数据截至 2026-09-18'),",
-   "check('刷新后副标题数据截至为最近交易日'+EXPmockEnd,\n    document.getElementById('subtitle').textContent.includes('数据截至 ' + EXPmockEnd),"),
-  ("return c.endDate === '2026-09-18' && c.savedAt && c.etfs.length === 4 && c.etfs[0].dates.length > 3000;",
-   "return c.endDate === EXPmockEnd && c.savedAt && c.etfs.length === 4 && c.etfs[0].dates.length > 3000;"),
-  ("d2status.includes('已加载浏览器缓存数据（截至 2026-09-18）');",
-   "d2status.includes('已加载浏览器缓存数据（截至 ' + EXPmockEnd + '）');"),
-]
-for old, new in pairs:
-    assert old in src, "未找到: " + old[:60]
-    src = src.replace(old, new, 1)
+    anchor2 = "const fmtSigned = x => (x>=0?'+':'') + (x*100).toFixed(2) + '%';"
+    assert anchor2 in src
+    src = src.replace(anchor2, inject_end + "\n" + anchor2, 1)
+    pairs = [
+      ("check('刷新后副标题数据截至为最近交易日2026-09-18',\n    document.getElementById('subtitle').textContent.includes('数据截至 2026-09-18'),",
+       "check('刷新后副标题数据截至为最近交易日'+EXPmockEnd,\n    document.getElementById('subtitle').textContent.includes('数据截至 ' + EXPmockEnd),"),
+      ("return c.endDate === '2026-09-18' && c.savedAt && c.etfs.length === 4 && c.etfs[0].dates.length > 3000;",
+       "return c.endDate === EXPmockEnd && c.savedAt && c.etfs.length === 4 && c.etfs[0].dates.length > 3000;"),
+      ("d2status.includes('已加载浏览器缓存数据（截至 2026-09-18）');",
+       "d2status.includes('已加载浏览器缓存数据（截至 ' + EXPmockEnd + '）');"),
+    ]
+    for old, new in pairs:
+        assert old in src, "未找到: " + old[:60]
+        src = src.replace(old, new, 1)
 
 open(f"{DIR}/smoke-test-pro.js", "w", encoding="utf-8").write(src)
 print("生成完成: smoke-test-pro.js")

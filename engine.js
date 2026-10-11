@@ -306,17 +306,19 @@
     var vol = sd * Math.sqrt(252);
     var sharpe = sd > 0 ? (m - rf / 252) / sd * Math.sqrt(252) : 0;
 
-    // 回撤
-    var peak = nav[i0], maxDD = 0, peakAll = nav[i0];
+    // 回撤 + 溃疡指数(Ulcer Index): 日频水下深度的均方根, 同时惩罚"跌得深"与"泡得久"
+    var peak = nav[i0], maxDD = 0, peakAll = nav[i0], ddSum2 = 0, ddCount = 0;
     for (var i2 = i0; i2 <= i1; i2++) {
       if (nav[i2] > peak) peak = nav[i2];
       if (peak > 0) {
         var dd = 1 - nav[i2] / peak;
         if (dd > maxDD) maxDD = dd;
+        ddSum2 += dd * dd; ddCount++;
       }
       if (nav[i2] > peakAll) peakAll = nav[i2];
     }
     var currentDD = peakAll > 0 ? 1 - nav[i1] / peakAll : 0;
+    var ulcer = ddCount > 0 ? Math.sqrt(ddSum2 / ddCount) : 0;
 
     // 周度收益(窗口内按ISO周聚合, 首周相对窗口起点)
     var weekEnd = {}, seen = {};
@@ -354,6 +356,8 @@
       total: total, annualized: annualized, vol: vol, sharpe: sharpe,
       maxDD: maxDD, currentDD: currentDD,
       calmar: maxDD > 0 ? annualized / maxDD : null,
+      ulcer: ulcer,
+      martin: ulcer > 0 ? (annualized - rf) / ulcer : null,
       weeklyWinRate: weeks > 0 ? wins / weeks : 0, weeks: weeks,
       switches: sw, switchesIn: switchesIn, holdDays: holdDays,
       tradingDays: days + 1,

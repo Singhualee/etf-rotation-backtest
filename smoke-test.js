@@ -4,6 +4,11 @@ const fs = require('fs');
 const path = process.argv[2] || '/Users/admin/WorkBuddy/dongliang/etf-rotation-backtest/ETF动量轮动回测.html';
 const html = fs.readFileSync(path, 'utf-8');
 
+// mock 数据的"最近交易日"随真实日期变化(站点刷新取到"今天"为止的最近工作日),
+// 因此不能硬编码日期, 一律按当天动态计算。
+const fmtLocalDate = d => d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+const EXPmockEnd = (() => { const d = new Date(); while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() - 1); return fmtLocalDate(d); })();
+
 let pass = 0, fail = 0;
 const errors = [];
 function check(name, cond, extra) {
@@ -153,7 +158,8 @@ setTimeout(async () => {
   const btnRefresh = document.getElementById('btnRefresh');
   const refreshStatus = document.getElementById('refreshStatus');
   check('右上角刷新按钮存在', !!btnRefresh);
-  // 构造与真实接口一致的分页假数据: 2013-05-15 起的工作日, 末尾延至 2026-09-25
+  // 构造与真实接口一致的分页假数据: 2013-05-15 起的工作日, 末尾延至"最近交易日"
+  // (与 EXPmockEnd 同源计算, 否则站点刷新取到的末日与断言期望的末日必然对不上)
   function weekdays(from, to) {
     const out = []; const d = new Date(from);
     const end = new Date(to);
@@ -164,7 +170,7 @@ setTimeout(async () => {
     }
     return out;
   }
-  const fakeDates = weekdays('2013-05-15', '2026-09-25');
+  const fakeDates = weekdays('2013-05-15', EXPmockEnd);
   const fakeSeries = {};
   ['sh513100','sh511260','sh518850','sh510300'].forEach(sym => {
     // 行格式与真实接口一致: [日期, 开, 收, 高, 低, 量], 收盘价在下标2
@@ -185,14 +191,14 @@ setTimeout(async () => {
     await new Promise(r => setTimeout(r, 1500));
   } catch (e) { refreshErr = e; }
   check('刷新流程无异常', refreshErr === null, refreshErr && refreshErr.message);
-  // 今天(周六)接口正确返回到最近交易日 2026-09-18; 假数据从2013-05-15全量替换 → 区间应显著变长
+  // 接口正确返回到最近交易日; 假数据从2013-05-15全量替换 → 区间应显著变长
   check('刷新后状态显示成功', refreshStatus.textContent.startsWith('✓ 已更新至'),
     refreshStatus.textContent);
   check('刷新后副标题区间延至2013年起(全量替换生效)',
     document.getElementById('subtitle').textContent.includes('回测区间 2013-06-14'),
     document.getElementById('subtitle').textContent);
-  check('刷新后副标题数据截至为最近交易日2026-09-18',
-    document.getElementById('subtitle').textContent.includes('数据截至 2026-09-18'),
+  check('刷新后副标题数据截至为最近交易日' + EXPmockEnd,
+    document.getElementById('subtitle').textContent.includes('数据截至 ' + EXPmockEnd),
     document.getElementById('subtitle').textContent);
   const refreshedCards = {};
   document.querySelectorAll('#metricCards .metric').forEach(m => {
@@ -207,7 +213,7 @@ setTimeout(async () => {
   check('缓存endDate与savedAt正确', (() => {
     if (!cachedRaw) return false;
     const c = JSON.parse(cachedRaw);
-    return c.endDate === '2026-09-18' && c.savedAt && c.etfs.length === 4 && c.etfs[0].dates.length > 3000;
+    return c.endDate === EXPmockEnd && c.savedAt && c.etfs.length === 4 && c.etfs[0].dates.length > 3000;
   })());
   check('缓存含分红表(510300/511260)', (() => {
     if (!cachedRaw) return false;
@@ -231,7 +237,7 @@ setTimeout(async () => {
   try {
     d2sub = dom2.window.document.getElementById('subtitle').textContent;
     d2status = dom2.window.document.getElementById('refreshStatus').textContent;
-    d2ok = d2sub.includes('回测区间 2013-06-14') && d2status.includes('已加载浏览器缓存数据（截至 2026-09-18）');
+    d2ok = d2sub.includes('回测区间 2013-06-14') && d2status.includes('已加载浏览器缓存数据（截至 ' + EXPmockEnd + '）');
   } catch (e) { d2ok = false; }
   check('二次打开自动加载缓存并提示', d2ok, d2sub + ' | ' + d2status);
 
@@ -272,7 +278,11 @@ setTimeout(async () => {
   check('超出数据范围自动收敛(交易日数<=5)', +clampCards['交易日数'] <= 5, clampCards['交易日数']);
   cs.value = '2026-08-01'; ce.value = '2026-12-31'; cs.onchange();   // 结束超出数据末日
   const clamp2 = collectCards();
-  check('结束超界收敛到数据末日(交易日数<=40)', +clamp2['交易日数'] <= 40, clamp2['交易日数']);
+  // 期望交易日数由假数据日历动态推导(2026-08-01 ~ 数据末日), 既验证"结束超界不取未来日期",
+  // 又不会因数据末日推进而失效(原先写死 <=40 是按 2026-09-25 末日标定的魔数)
+  const clamp2Exp = fakeDates.filter(d => d >= '2026-08-01').length;
+  check('结束超界收敛到数据末日(交易日数=数据末日前的假数据天数)',
+    +clamp2['交易日数'] === clamp2Exp, clamp2['交易日数'] + ' vs 期望 ' + clamp2Exp);
 
   // 14. 下次打开自动恢复上次所选区间(年/季/自定义)
   function freshDom(url, preSetup) {

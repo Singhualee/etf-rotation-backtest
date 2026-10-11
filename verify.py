@@ -15,7 +15,10 @@ RF = 0.02
 
 def load_data():
     raw = open(f"{DIR}/data.js", encoding="utf-8").read()
-    return json.loads(raw[raw.index("{"):raw.rindex("}") + 1])
+    # data.js 含两条顶层语句: var ETF_DATA = {...}; 与 ETF_DATA.extended = {...};
+    # 基准回测只用第一条; extended 仅供网页端"长历史(2013起)"模式拼接, 此处忽略。
+    data, _ = json.JSONDecoder().raw_decode(raw, raw.index("{"))
+    return data
 
 
 def monday_of(d):
@@ -101,14 +104,20 @@ def run(bt_data):
     rs = [nav[i] / nav[i - 1] - 1 for i in range(1, len(nav))]
     m = sum(rs) / len(rs)
     sd = math.sqrt(sum((x - m) ** 2 for x in rs) / (len(rs) - 1))
-    peak, max_dd = nav[0], 0.0
+    peak, max_dd, dd_sq = nav[0], 0.0, 0.0
     for v2 in nav:
         peak = max(peak, v2)
-        max_dd = max(max_dd, 1 - v2 / peak)
+        dd = 1 - v2 / peak
+        max_dd = max(max_dd, dd)
+        dd_sq += dd * dd
     cur_dd = 1 - nav[-1] / max(nav)
     total = nav[-1] / nav[0] - 1
     annualized = (nav[-1] / nav[0]) ** (252 / (len(nav) - 1)) - 1
     sharpe = (m - RF / 252) / sd * math.sqrt(252)
+    # 溃疡指数: 日频回撤深度的均方根(惩罚深度与持续时间); 马丁比率 = 超额年化收益 / 溃疡指数
+    ulcer = math.sqrt(dd_sq / len(nav))
+    calmar = annualized / max_dd if max_dd > 0 else None
+    martin = (annualized - RF) / ulcer if ulcer > 0 else None
 
     week_end = {}
     for i in range(len(nav)):
@@ -132,6 +141,7 @@ def run(bt_data):
         "metrics": {
             "total": total, "annualized": annualized, "vol": sd * math.sqrt(252),
             "sharpe": sharpe, "maxDD": max_dd, "currentDD": cur_dd,
+            "calmar": calmar, "ulcer": ulcer, "martin": martin,
             "weeklyWinRate": wins / weeks if weeks else 0,
             "switches": len(switches) - 1,  # 不含建仓
         },
@@ -147,7 +157,10 @@ def main():
 
     def cmp(name, a, b, tol=1e-9):
         nonlocal ok
-        good = abs(a - b) <= tol
+        if a is None or b is None:
+            good = (a is None) == (b is None)
+        else:
+            good = abs(a - b) <= tol
         ok = ok and good
         print(f"  {'PASS' if good else 'FAIL'}  {name}: py={a!r} js={b!r}")
 
@@ -189,7 +202,8 @@ def main():
                 print("    py:", a, " js:", b)
 
     print("== 指标 ==")
-    for k in ("total", "annualized", "vol", "sharpe", "maxDD", "currentDD", "weeklyWinRate", "switches"):
+    for k in ("total", "annualized", "vol", "sharpe", "maxDD", "currentDD",
+              "calmar", "ulcer", "martin", "weeklyWinRate", "switches"):
         cmp(k, py["metrics"][k], js["metrics"][k], tol=1e-9)
 
     print()
@@ -200,6 +214,9 @@ def main():
     print(f"  夏普比率(rf=2%): {py['metrics']['sharpe']:.3f}")
     print(f"  最大回撤: {py['metrics']['maxDD']*100:.2f}%")
     print(f"  当前回撤: {py['metrics']['currentDD']*100:.2f}%")
+    print(f"  卡玛比率: {py['metrics']['calmar']:.3f}")
+    print(f"  溃疡指数: {py['metrics']['ulcer']*100:.2f}%")
+    print(f"  马丁比率: {py['metrics']['martin']:.3f}")
     print(f"  切换次数: {py['metrics']['switches']}")
     raise SystemExit(0 if ok else 1)
 

@@ -23,6 +23,7 @@ const dom = new JSDOM(html, {
   runScripts: 'dangerously',
   pretendToBeVisual: true,
   beforeParse(window) {
+    window.__wbNoAutoRefresh = true;   // 打开时自动更新会引入网络与时序, 本审查只针对已渲染状态
     const noop = () => {};
     const ctxProxy = new Proxy({}, {
       get(t, p) {
@@ -68,6 +69,8 @@ function cmpCards(name, cards, metrics) {
     ['夏普比率', metrics.sharpe, 0.005],
     ['最大回撤', -metrics.maxDD * 100, 0.005],
     ['卡玛比率', metrics.calmar, 0.0005],
+    ['溃疡指数', metrics.ulcer * 100, 0.005],
+    ['马丁比率', metrics.martin, 0.0005],
     ['切换次数', metrics.switches, 0],
   ];
   let bad = [];
@@ -94,8 +97,8 @@ setTimeout(async () => {
   const rf = +document.getElementById('rfSlider').value / 100;
   let m = RE.computeMetrics(RE.runBacktest(ETF_DATA_G.etfs, pageOpts()), { rf });
   let cards = pageCards();
-  cmpCards('A7 默认参数下10项指标卡与引擎一致(vol18%)', cards, m);
-  check('A8 指标卡共10张', Object.keys(cards).length === 10, Object.keys(cards).join(','));
+  cmpCards('A7 默认参数下12项指标卡与引擎一致(vol18%)', cards, m);
+  check('A8 指标卡共12张', Object.keys(cards).length === 12, Object.keys(cards).join(','));
 
   // ---- B. 参数矩阵: volSel 全档位 ----
   const volSel = document.getElementById('volSel');

@@ -28,6 +28,9 @@ var out = {
     sharpe: metrics.sharpe,
     maxDD: metrics.maxDD,
     currentDD: metrics.currentDD,
+    calmar: metrics.calmar,
+    ulcer: metrics.ulcer,
+    martin: metrics.martin,
     weeklyWinRate: metrics.weeklyWinRate,
     switches: metrics.switches,
   },
@@ -35,3 +38,4 @@ var out = {
 fs.writeFileSync(path.join(dir, 'engine_result.json'), JSON.stringify(out));
 console.log('JS引擎完成: ' + bt.dates.length + ' 天, ' + bt.switches.length + ' 次调仓事件(含建仓)');
 console.log('总收益=' + (metrics.total * 100).toFixed(4) + '% 年化=' + (metrics.annualized * 100).toFixed(4) + '% 夏普=' + metrics.sharpe.toFixed(6) + ' 最大回撤=' + (metrics.maxDD * 100).toFixed(4) + '%');
+console.log('卡玛=' + (metrics.calmar === null ? '—' : metrics.calmar.toFixed(6)) + ' 溃疡指数=' + (metrics.ulcer * 100).toFixed(4) + '% 马丁比率=' + (metrics.martin === null ? '—' : metrics.martin.toFixed(6)));

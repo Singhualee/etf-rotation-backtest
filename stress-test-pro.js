@@ -19,6 +19,7 @@ const errors = [];
 const dom = new JSDOM(html, {
   url: 'http://localhost/stress.html', runScripts: 'dangerously', pretendToBeVisual: true,
   beforeParse(w) {
+    w.__wbNoAutoRefresh = true;   // 压力测试只重算指标, 不引入打开时的自动更新
     const noop = () => {};
     const ctx = new Proxy({}, { get(t, p) { if (p === 'measureText') return () => ({ width: 10 }); if (p === 'canvas') return { width: 300, height: 150 }; if (p === 'createLinearGradient' || p === 'createRadialGradient') return () => ({ addColorStop: noop }); if (typeof p === 'string') return noop; }, set() { return true; } });
     w.HTMLCanvasElement.prototype.getContext = function () { return ctx; };

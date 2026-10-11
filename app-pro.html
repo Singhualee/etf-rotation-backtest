@@ -64,6 +64,9 @@ tr.hl td{font-weight:700}
       <button class="seg" id="btnRefresh">↻ 刷新数据</button>
       <button class="seg" id="btnSave" title="把当前数据固化为一个新网页文件下载, 用它替换旧文件即可永久保存">保存副本</button>
     </div>
+    <label class="sub" style="display:inline-flex;align-items:center;gap:5px;margin-top:6px;cursor:pointer" title="打开页面时若发现数据已落后于最近交易日, 自动在后台更新一次; 同一天只尝试一次, 失败不影响使用, 且不会改动本地文件">
+      <input type="checkbox" id="autoRefreshChk">打开时自动更新数据
+    </label>
     <div class="sub" id="refreshStatus" style="max-width:340px;margin-top:4px"></div>
   </div>
 </div>
@@ -112,7 +115,7 @@ tr.hl td{font-weight:700}
 <div class="metrics" id="metricCards"></div>
 
 <div class="card">
-  <h2>净值对比<span class="hint">以所选窗口起点重设基数 = 1 · 窗口内指标已完整重算 · 策略曲线上的 ▲ 为切换点，颜色=切换后的标的，悬停查看明细</span></h2>
+  <h2>净值对比<span class="hint">以所选窗口起点重设基数 = 1 · 窗口内指标已完整重算 · 策略曲线上的 ▲ 为切换点，颜色=切换后的标的，悬停查看明细（鼠标压在曲线上时明细只列该条）</span></h2>
   <div id="navChart" class="chart tall"></div>
   <div class="legendbox" id="navLegend"></div>
 </div>
@@ -133,7 +136,7 @@ tr.hl td{font-weight:700}
 </div>
 
 <div class="card">
-  <h2>窗口内策略与基准对比<span class="hint">按所选窗口完整重算，夏普与上方无风险利率一致</span></h2>
+  <h2>窗口内策略与基准对比<span class="hint">按所选窗口完整重算，夏普与马丁比率均与上方无风险利率一致</span></h2>
   <div style="overflow-x:auto"><table id="cmpTable"></table></div>
 </div>
 
@@ -148,6 +151,7 @@ tr.hl td{font-weight:700}
   2) 信号与成交同用当日收盘价，无前视偏差；切换成本按参数区设置计提；价格为前复权收盘价。回测口径经 Python 独立实现交叉验证。<br>
   3) 年化 = (1+总收益)^(252/交易日数) − 1；夏普 = (日均收益 − 日无风险利率)/日波动 × √252，无风险利率可用上方滑块调整（默认 2%）。<br>
   4) 最大回撤 / 当前回撤按日频净值相对历史峰值计算；卡玛 = 年化收益 / 最大回撤；周度胜率按 ISO 周聚合。<br>
+  4b) 溃疡指数(Ulcer Index) = √(ΣDDᵢ²/n)，DDᵢ 为窗口内每个交易日的回撤深度，n 为交易天数，同时惩罚回撤的<b>深度</b>与<b>持续时间</b>，数值越小持有体验越好、0 表示从未回撤；马丁比率(Martin / UPI) = (年化收益 − 无风险利率) / 溃疡指数，可理解为用溃疡指数作分母的夏普，随上方无风险利率滑块联动。<br>
   5) 等权每日再平衡 = 每日权重归一回 25%；等权 5% 带宽再平衡 = 期初各 25% 买入后持有，任一 ETF 权重偏离超过 5 个百分点（&lt;20% 或 &gt;30%）时当日收盘再平衡回等权。<br>
   6) 数据（<span id="dataNote"></span>）：510300/511260 用不复权日线+分红表按<b>标准等比前复权</b>重建（除息日因子仅作用于之前日期，分红不会被计成当日下跌），分红表经 Wind 月度锚点核对；513100 保留前复权序列（历史含份额折算处理）。刷新时通过"不复权与前复权差值步进"自动识别新分红、经除息日跌幅校验后并入分红表。回测区间由四只 ETF 数据齐备日（518850 上市后满 20 个交易日）决定。<br>
   7) 数据保存分三层：① 点击"刷新数据"成功后自动存入浏览器本地缓存（localStorage，固定约 280KB，每次覆盖不累积），下次打开自动加载；② 点"保存副本"首次选择本网页文件并授权后，之后每次刷新会自动把最新数据写回该文件（需 Chrome/Edge 支持）；③ 不支持写回的环境会自动下载一份嵌入了最新数据的网页副本，用它替换旧文件即可永久保存。<br>
@@ -163,6 +167,9 @@ var EQ_COLOR = '#8a93a0', BAND_COLOR = '#b06a3b', STRAT_COLOR = '#d93831';
 var etfs = ETF_DATA.etfs;
 // V2: 不复权+分红重建口径; 旧V1缓存为有缺陷的腾讯qfq数据, 自动作废
 var CACHE_KEY = 'etfRotationCacheV2';
+// 打开时自动更新: AUTO_KEY='0' 表示用户关闭; AUTO_STATE_KEY 记录 {d:'YYYY-MM-DD', ok:bool, at:ts}
+var AUTO_KEY = 'etfRotationAutoV1';
+var AUTO_STATE_KEY = 'etfRotationAutoStateV1';
 // 分红ETF清单: 刷新时走"不复权+分红表重建"管线(腾讯qfq为等差复权, 对分红ETF有系统性偏差)
 var DIV_CODES = {'510300':1, '511260':1};
 var cacheInfo = null;   // 启动时若浏览器缓存比内嵌数据新则使用
@@ -272,6 +279,40 @@ var PAGE = 640;
 function todayStr(){
   var d=new Date(); return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2);
 }
+
+// ---- 打开时自动更新: 新鲜度判断 ----
+// 理论最近交易日: 工作日 15:05(ETF 收盘后当日日线才生成)之后才算当天, 否则回退到前一个工作日。
+// 不含节假日日历 —— 节假日最多多刷一次(约1.8s), 由"当天只自动尝试一次"兜底, 不值得引入日历维护成本。
+function latestExpectedTradingDay(){
+  if(window.__wbExpectedTradingDay) return window.__wbExpectedTradingDay;   // 测试钩子: 注入期望交易日
+  var d=new Date(), wd=d.getDay(), mins=d.getHours()*60+d.getMinutes();
+  if(wd>=1 && wd<=5 && mins < 15*60+5) d.setDate(d.getDate()-1);
+  while(d.getDay()===0 || d.getDay()===6) d.setDate(d.getDate()-1);
+  return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2);
+}
+function autoRefreshPref(){
+  try{ return localStorage.getItem(AUTO_KEY)!=='0'; }catch(e){ return true; }
+}
+function autoRefreshEnabled(){
+  if(window.__wbNoAutoRefresh) return false;   // 测试钩子: 强制关闭, 保证既有用例确定性
+  return autoRefreshPref();
+}
+function readAutoState(){
+  try{ var r=localStorage.getItem(AUTO_STATE_KEY); return r?JSON.parse(r):null; }catch(e){ return null; }
+}
+function writeAutoState(ok){
+  try{ localStorage.setItem(AUTO_STATE_KEY, JSON.stringify({d:todayStr(), ok:!!ok, at:Date.now()})); }catch(e){}
+}
+// 数据已落后于最近交易日 且 当天尚未成功自动更新过 → 需要联网。
+// 当天失败过则 2 小时后再试, 避免离线时每次打开都卡在请求上。
+function shouldAutoRefresh(){
+  if(!autoRefreshEnabled()) return false;
+  if(!(dataEndDate() < latestExpectedTradingDay())) return false;   // 已是最新, 不联网
+  var st=readAutoState();
+  if(!st || st.d!==todayStr()) return true;
+  return !st.ok && (Date.now()-(st.at||0)) > 2*3600*1000;
+}
+window.__rotationAuto = { should: shouldAutoRefresh, latestExpected: latestExpectedTradingDay };
 function withTimeout(p, ms, msg){
   return new Promise(function(resolve,reject){
     var t=setTimeout(function(){ reject(new Error(msg||'请求超时')); }, ms);
@@ -567,9 +608,18 @@ restoreHandle(function(){
   }
 });
 
-document.getElementById('btnRefresh').onclick = async function(){
-  var btn=this, st=document.getElementById('refreshStatus');
-  btn.disabled=true; st.textContent='正在更新数据…';
+// ---- 数据刷新管线(手动按钮与打开时自动更新共用) ----
+// opts.silent : 静默模式(自动更新用) —— 不刷每页进度, 失败只降级提示
+// opts.persist: 是否写回本地网页文件, 默认 true; 自动更新传 false
+//               (避免"只是打开看了一眼"却静默改动了本地文件; 写回仍归手动刷新)
+async function refreshData(opts){
+  opts = opts || {};
+  var silent=!!opts.silent, persist=opts.persist!==false;
+  var btn=document.getElementById('btnRefresh'), st=document.getElementById('refreshStatus');
+  if(btn.disabled) return {ok:false, reason:'busy'};
+  var prevStatus = st.textContent;
+  btn.disabled=true;
+  st.textContent = silent ? '正在后台更新数据…' : '正在更新数据…';
   var results=[], i=0;
   async function next(){
     if(i>=etfs.length){
@@ -597,25 +647,49 @@ document.getElementById('btnRefresh').onclick = async function(){
       renderYearChart(); renderNavLegend();
       updateSubtitle();
       var saved = saveCache();
-      var extra = await autoPersist();
-      st.textContent = '✓ 已更新至 ' + bt.dates[bt.dates.length-1] +
-        (saved ? '，已存浏览器缓存' : '（浏览器缓存保存失败，仅本次生效）') + extra +
-        divNotes.join('；');
+      var extra = persist ? await autoPersist() : '';
+      st.textContent = silent
+        ? '✓ 已自动更新至 ' + bt.dates[bt.dates.length-1] + '（仅存浏览器缓存，未改动本地文件）'
+        : '✓ 已更新至 ' + bt.dates[bt.dates.length-1] +
+          (saved ? '，已存浏览器缓存' : '（浏览器缓存保存失败，仅本次生效）') + extra +
+          divNotes.join('；');
       btn.disabled=false;
-      return;
+      return {ok:true, endDate:bt.dates[bt.dates.length-1]};
     }
     var e=etfs[i], page=0;
-    st.textContent = '正在更新 '+e.label+' '+e.code+'…';
-    fetchSymbol(e.symbol, e.code, function(){ page++; st.textContent = '正在更新 '+e.label+' '+e.code+'…第'+page+'页'; }).then(function(nd){
+    if(!silent) st.textContent = '正在更新 '+e.label+' '+e.code+'…';
+    return fetchSymbol(e.symbol, e.code, function(){ page++; if(!silent) st.textContent = '正在更新 '+e.label+' '+e.code+'…第'+page+'页'; }).then(function(nd){
       if(nd.dates.length < 500) throw new Error(e.code+' 返回数据异常（'+nd.dates.length+' 行）');
-      results[i]=nd; i++; next();
+      results[i]=nd; i++; return next();
     }).catch(function(err){
-      st.textContent = '✗ 更新失败：'+err.message+'（保留原数据）';
+      st.textContent = silent
+        ? (prevStatus || ('数据截至 '+dataEndDate()+'（自动更新失败，已保留原数据）'))
+        : '✗ 更新失败：'+err.message+'（保留原数据）';
       btn.disabled=false;
+      return {ok:false, reason:err.message};
     });
   }
-  await next();
-};
+  return next();
+}
+document.getElementById('btnRefresh').onclick = function(){ refreshData({}); };
+
+// ---- 打开时自动更新: 缓存已渲染完成后才在后台发起, 不阻塞界面 ----
+function runAutoRefresh(){
+  refreshData({silent:true, persist:false}).then(function(res){ writeAutoState(res && res.ok); });
+}
+function setupAutoRefresh(){
+  var chk=document.getElementById('autoRefreshChk'), st=document.getElementById('refreshStatus');
+  chk.checked = autoRefreshPref();
+  chk.onchange = function(){
+    try{ localStorage.setItem(AUTO_KEY, chk.checked?'1':'0'); }catch(e){}
+    if(chk.checked && shouldAutoRefresh()) runAutoRefresh();
+  };
+  if(shouldAutoRefresh()){ runAutoRefresh(); return; }
+  // 未自动更新(开关关闭 / 当天已试过 / 已是最新): 若数据确实落后则提示, 但不覆盖已有提示
+  if(dataEndDate() < latestExpectedTradingDay() && !st.textContent){
+    st.textContent = '数据截至 '+dataEndDate()+'（非最新，可点"刷新数据"）';
+  }
+}
 
 // ---- 时间筛选控件 ----
 var yearSel = document.getElementById('yearSel'), qSel = document.getElementById('qSel');
@@ -822,6 +896,8 @@ function renderMetrics(){
     {k:'当前回撤', v:fmtPct(-m.currentDD), c: m.currentDD>0.001?'neg':'', s:'相对历史峰值'},
     {k:'年化波动率', v:fmtPct(m.vol), c:'', s:'日收益标准差 × √252'},
     {k:'卡玛比率', v:m.calmar===null?'—':m.calmar.toFixed(3), c:'', s:'年化收益 / 最大回撤'},
+    {k:'溃疡指数', v:fmtPct(m.ulcer), c:'', s:'日频回撤均方根，越低越好'},
+    {k:'马丁比率', v:m.martin===null?'—':m.martin.toFixed(3), c:'', s:'(年化 − 无风险) / 溃疡指数'},
     {k:'周度胜率', v:(m.weeklyWinRate*100).toFixed(1)+'%', c:'', s:m.weeks+' 个完整周'},
     {k:'切换次数', v:String(m.switches), c:'', s:swSub},
     {k:'交易日数', v:String(m.tradingDays), c:'', s:bt.dates[win.i0]+' ~ '+bt.dates[win.i1]},
@@ -832,6 +908,91 @@ function renderMetrics(){
 }
 
 // ---- 净值图 ----
+// 鼠标压在曲线上时, ECharts 会给该条打 emphasis、其余打 blur(这条路径不派发任何事件;
+// 而且 tooltip 渲染的那一刻, 元素的渲染状态正被改写, 直接读状态会读到空的)。
+// 因此在事件捕获阶段先做一次命中判定, 把"当前压在哪条曲线上"记下来供随后的 tooltip 使用。
+//
+// 鼠标压在某条曲线上时: 画面上只留这一条高亮(其余淡出), 明细也只列这一条。
+//
+// ⚠️ 不要试图"复刻 ECharts 自己的悬停命中", 这条路反复踩坑, 两个坑都是"时好时坏"的来源:
+// 1) 轴联动会给每条曲线额外画一个高亮小圆点(type 'path', z2=110, 也属于该 series)。
+//    它停在"上一次轴位置"上 —— 光标已经挪到这一列、圆点却还在上一列。无论是按元素类型收窄
+//    还是按 seriesIndex 放宽, 命中结果都会在"压住曲线"与"没压住"之间随机漂移。
+// 2) ECharts 自己算出的 emphasis/blur 是"下一帧"才写进元素渲染状态的: 在事件里读到的永远是
+//    上一帧, 在 tooltip 的 formatter 里读则一定是空。
+// 所以改成"判定与画面同源, 由我们说了算":
+//   a) 折线设 silent —— ECharts 不再自动给任何曲线打高亮(轴联动浮层、轴指示圆点都不受影响);
+//   b) 我们按几何判定: 光标 x → 轴值 → 各条曲线在该点的像素 y, 取纵向最近且在容差内的一条;
+//   c) 由我们 dispatch highlight/downplay 驱动画面 —— 且必须在**每个**鼠标事件处理完之后重发一次
+//      (ECharts 处理每个事件都会清掉上一次的 emphasis; 早于它派发则会被覆盖);
+//   d) 浮层 formatter 用同一个 navFocusSeries 过滤。
+// "画面凸显的是哪条" 与 "明细列的是哪条" 来自同一个判断, 结构上不可能再分歧。
+var navSeriesNames = [], navSwitchByDate = {}, navMarkVisible = true;
+var navFocusSeries = null, navSrc = [], navTimes = [], navVisible = [];
+var NAV_HIT_PX = 8;      // "压在曲线上"的纵向容差(px): 与原来轴指示圆点的手感一致
+function navIdxAt(chart, x){          // 光标 x → 窗口内数据下标(按轴值就近, 二分)
+  var t = chart.convertFromPixel({xAxisIndex:0}, x);
+  if(t===null || t===undefined || isNaN(t) || !navTimes.length) return -1;
+  if(t <= navTimes[0]) return 0;
+  if(t >= navTimes[navTimes.length-1]) return navTimes.length-1;
+  var lo = 0, hi = navTimes.length-1;
+  while(lo < hi){ var mid = (lo+hi)>>1; if(navTimes[mid] < t) lo = mid+1; else hi = mid; }
+  if(lo>0 && Math.abs(navTimes[lo-1]-t) < Math.abs(navTimes[lo]-t)) lo--;
+  return lo;
+}
+function navHitName(chart, x, y){     // 压在哪条曲线上? 没有则 null
+  try{
+    var k = navIdxAt(chart, x);
+    if(k < 0) return null;
+    var t = navTimes[k], best = -1, bestD = NAV_HIT_PX;
+    for(var si=0; si<navSrc.length; si++){
+      var src = navSrc[si];
+      if(!src || !navVisible[si]) continue;                 // 图例关掉的曲线不参与判定
+      var p = chart.convertToPixel({xAxisIndex:0, yAxisIndex:0}, [t, src.arr[win.i0+k]/src.base]);
+      if(!p) continue;
+      var d = Math.abs(p[1]-y);
+      if(d <= bestD){ bestD = d; best = si; }               // 同距取后画的(视觉在上)
+    }
+    return best<0 ? null : navSeriesNames[best];
+  }catch(e){}
+  return null;
+}
+function navPaint(chart){          // 把画面驱动到当前判定(与浮层用的是同一个 navFocusSeries)
+  var si = navFocusSeries===null ? -1 : navSeriesNames.indexOf(navFocusSeries);
+  if(si >= 0) chart.dispatchAction({type:'highlight', seriesIndex:si});
+  else chart.dispatchAction({type:'downplay'});
+}
+function navSetFocus(chart, name){ // 立即改判定并重绘画面(鼠标移出图表 / 图例变动时用)
+  navFocusSeries = name;
+  navPaint(chart);
+}
+function bindNavHover(chart){
+  if(chart.__navHoverBound) return;
+  chart.__navHoverBound = true;
+  var box = chart.getDom();
+  // ① 判定: 挂在 window 的捕获阶段 —— 保证早于 zrender 对同一次事件的处理, 于是随后渲染的浮层
+  //    用的就是本次判定。(挂在图表容器上不够稳: 若晚于浮层渲染, 判定会慢一拍, 鼠标停下时就一直错。)
+  window.addEventListener('mousemove', function(ev){
+    var r = box.getBoundingClientRect();
+    var w = r.width || chart.getWidth() || box.clientWidth;
+    var h = r.height || chart.getHeight() || box.clientHeight;
+    var inside = w>0 && h>0 && ev.clientX>=r.left && ev.clientX<=r.left+w && ev.clientY>=r.top && ev.clientY<=r.top+h;
+    navFocusSeries = inside ? navHitName(chart, ev.clientX - r.left, ev.clientY - r.top) : null;
+  }, true);
+  // ② 画面: 在容器冒泡阶段(此刻 zrender 已处理完这次事件)按①的判定重新驱动。
+  //    ⚠️ ECharts 每处理一个事件都会把上一次的 emphasis 清掉(实测), 所以这里每个事件都要重发,
+  //    不能只"判定变了才发"; 发早了(捕获阶段)会被同一次事件的处理覆盖掉, 表现为压住曲线却不淡出。
+  box.addEventListener('mousemove', function(){ navPaint(chart); }, false);
+  box.addEventListener('mouseleave', function(){ navSetFocus(chart, null); }, true);
+  // 图例里把"切换点"关掉后, 明细里也不该再出现 ▲ 切换信息
+  chart.on('legendselectchanged', function(p){
+    var s = p && p.selected;
+    if(!s) return;
+    if(Object.prototype.hasOwnProperty.call(s, '切换点')) navMarkVisible = s['切换点'] !== false;
+    for(var i=0;i<navSeriesNames.length;i++) navVisible[i] = s[navSeriesNames[i]] !== false;
+    if(navFocusSeries!==null && navVisible[navSeriesNames.indexOf(navFocusSeries)]===false) navSetFocus(chart, null);
+  });
+}
 function windowSeries(arr){
   var out=[], base=arr[win.i0];
   for(var i=win.i0;i<=win.i1;i++) out.push([bt.dates[i], arr[i]/base]);
@@ -839,12 +1000,14 @@ function windowSeries(arr){
 }
 function renderNavChart(){
   var chart = getChart('navChart');
-  var series = [{name:'动量轮动策略', data:windowSeries(bt.nav), color:STRAT_COLOR, w:2.6}];
+  bindNavHover(chart);
+  // arr/base 供几何判定用: 该序列在窗口内某一天的净值 = arr[i]/base, 与 windowSeries 同一口径
+  var series = [{name:'动量轮动策略', data:windowSeries(bt.nav), arr:bt.nav, color:STRAT_COLOR, w:2.6}];
   etfs.forEach(function(e,k){
-    series.push({name:e.label+' '+e.code, data:windowSeries(bt.benchmarks[k]), color:COLORS[e.code], w:1.3});
+    series.push({name:e.label+' '+e.code, data:windowSeries(bt.benchmarks[k]), arr:bt.benchmarks[k], color:COLORS[e.code], w:1.3});
   });
-  series.push({name:'等权每日再平衡', data:windowSeries(bt.equalNav), color:EQ_COLOR, w:1.5, dash:[6,4]});
-  series.push({name:'等权5%带宽再平衡', data:windowSeries(bt.bandEqualNav), color:BAND_COLOR, w:1.5, dash:[2,3]});
+  series.push({name:'等权每日再平衡', data:windowSeries(bt.equalNav), arr:bt.equalNav, color:EQ_COLOR, w:1.5, dash:[6,4]});
+  series.push({name:'等权5%带宽再平衡', data:windowSeries(bt.bandEqualNav), arr:bt.bandEqualNav, color:BAND_COLOR, w:1.5, dash:[2,3]});
   // 切换点标记: ▲ 画在策略曲线上, 颜色=切换后标的
   var dateIdx = {};
   for(var di=0; di<bt.dates.length; di++) dateIdx[bt.dates[di]] = di;
@@ -857,21 +1020,48 @@ function renderNavChart(){
   });
   series.push({name:'切换点', marks:markData});
   var log = document.getElementById('logChk').checked;
+  // setOption(..., true) 是 notMerge, 不带回 legend.selected 会把用户手动隐藏的曲线全部复活
+  var legendSel = null;
+  try{
+    var lg = chart.getOption().legend;
+    if(lg && lg[0] && lg[0].selected) legendSel = lg[0].selected;
+  }catch(e){}
+  navSeriesNames = series.map(function(s){ return s.name; });   // 下标 = seriesIndex
+  navSrc = []; navVisible = [];
+  series.forEach(function(s, si){
+    if(s.marks){ navSrc[si] = null; navVisible[si] = true; return; }   // ▲ 切换点是叠在策略线上的标记, 不参与聚焦
+    navSrc[si] = {arr: s.arr, base: s.arr[win.i0]};
+    navVisible[si] = !legendSel || legendSel[s.name] !== false;        // 图例关掉的曲线不参与判定
+  });
+  navTimes = [];
+  for(var ti = win.i0; ti <= win.i1; ti++) navTimes.push(+echarts.time.parse(bt.dates[ti]));
+  navSwitchByDate = {};
+  navMarks.forEach(function(s){ navSwitchByDate[s.date] = s; });
+  navMarkVisible = !legendSel || legendSel['切换点'] !== false;
+  navFocusSeries = null;                       // 重绘后交给下一次鼠标移动重新判定
   chart.setOption({
-    animation:false, legend:{top:0,textStyle:{fontSize:12}},
+    animation:false, legend:{top:0,textStyle:{fontSize:12}, selected: legendSel || {}},
     tooltip:{trigger:'axis', formatter:function(params){
+      if(!params || !params.length) return '';
+      var focus = navFocusSeries;
+      // 画面只凸显这一条 → 明细也只列这一条(过滤后为空则退回全部, 避免只剩个空浮层)
+      if(focus){
+        var picked = params.filter(function(p){ return p.seriesName===focus; });
+        if(picked.length) params = picked;
+      }
       var t = params && params.length ? params[0].axisValue : '';
       var head = (typeof t==='number' ? echarts.time.format(t,'{yyyy}-{MM}-{dd}') : t);
       var html = '<div style="font-weight:500;margin-bottom:2px">'+head+'</div>';
       params.forEach(function(p){
-        if(p.seriesName==='切换点'){
-          var s = p.data.switchRef;
-          html += '<div style="margin-top:2px">▲ 切换: '+etfs[s.from].label+' <b>→</b> <span style="color:'+COLORS[etfs[s.to].code]+';font-weight:500">'+etfs[s.to].label+' '+etfs[s.to].code+'</span>'+(s.riskOff?'（避险）':'')+'<br><span style="color:#8a93a0">'+s.date+' 收盘决策，次日起生效</span></div>';
-        } else {
-          var v = Array.isArray(p.value)? p.value[1] : p.value;
-          html += '<div>'+p.marker+p.seriesName+' '+(isNaN(v)?'—':(+v).toFixed(4))+'</div>';
-        }
+        if(p.seriesName==='切换点') return;   // 切换信息改由日期查表补, 不再依赖它为一行
+        var v = Array.isArray(p.value)? p.value[1] : p.value;
+        html += '<div>'+p.marker+p.seriesName+' '+(isNaN(v)?'—':(+v).toFixed(4))+'</div>';
       });
+      // ▲ 画在策略曲线上: 只有策略曲线可见时才附上切换信息
+      var mk = navSwitchByDate[head];
+      if(mk && navMarkVisible && (!focus || focus==='动量轮动策略')){
+        html += '<div style="margin-top:2px">▲ 切换: '+etfs[mk.from].label+' <b>→</b> <span style="color:'+COLORS[etfs[mk.to].code]+';font-weight:500">'+etfs[mk.to].label+' '+etfs[mk.to].code+'</span>'+(mk.riskOff?'（避险）':'')+'<br><span style="color:#8a93a0">'+mk.date+' 收盘决策，次日起生效</span></div>';
+      }
       return html;
     }},
     grid:{top:36,left:12,right:16,bottom:12,containLabel:true},
@@ -879,8 +1069,11 @@ function renderNavChart(){
     yAxis:{type: log?'log':'value', scale:true, axisLabel:{formatter:function(v){return (+v).toFixed(log?1:2)}}},
     series: series.map(function(s){
       if(s.marks) return {name:s.name, type:'scatter', symbol:'triangle', symbolSize:10, data:s.marks,
-        itemStyle:{borderColor:'#fff', borderWidth:0.8}, z:12, silent:false};
-      return {name:s.name,type:'line',showSymbol:false,data:s.data,lineStyle:{width:s.w,color:s.color,type:s.dash?'dashed':'solid'},
+        itemStyle:{borderColor:'#fff', borderWidth:0.8}, z:12, silent:true};
+      // silent: 不让 ECharts 自动给折线打悬停高亮 —— 高亮完全由 navSetFocus 按几何判定派发,
+      // 这样"画面凸显哪条"与"明细列哪条"必然同源。(轴联动浮层与轴指示圆点不受 silent 影响)
+      return {name:s.name,type:'line',showSymbol:false,silent:true,data:s.data,
+        lineStyle:{width:s.w,color:s.color,type:s.dash?'dashed':'solid'},
         itemStyle:{color:s.color},emphasis:{focus:'series'}};
     })
   }, true);
@@ -990,7 +1183,7 @@ function renderCmpTable(){
   etfs.forEach(function(e,k){ rows.push({name:e.label+' '+e.code, arr:bt.benchmarks[k]}); });
   rows.push({name:'等权每日再平衡', arr:bt.equalNav});
   rows.push({name:'等权5%带宽再平衡', arr:bt.bandEqualNav});
-  var html = '<tr><th>组合</th><th>总收益率</th><th>年化收益率</th><th>夏普比率</th><th>最大回撤</th><th>卡玛比率</th></tr>';
+  var html = '<tr><th>组合</th><th>总收益率</th><th>年化收益率</th><th>夏普比率</th><th>最大回撤</th><th>卡玛比率</th><th>溃疡指数</th><th>马丁比率</th></tr>';
   rows.forEach(function(r){
     var m = RotationEngine.computeMetrics(pseudoBT(r.arr),{rf:rf,i0:win.i0,i1:win.i1});
     html += '<tr'+(r.hl?' class="hl"':'')+'><td>'+(r.hl?'<span class="tag" style="background:'+STRAT_COLOR+'">策略</span> ':'' )+r.name+'</td>'
@@ -998,7 +1191,9 @@ function renderCmpTable(){
       +'<td class="'+cls(m.annualized)+'">'+fmtPct(m.annualized,true)+'</td>'
       +'<td>'+m.sharpe.toFixed(3)+'</td>'
       +'<td class="neg">'+fmtPct(-m.maxDD)+'</td>'
-      +'<td>'+(m.calmar===null?'—':m.calmar.toFixed(2))+'</td></tr>';
+      +'<td>'+(m.calmar===null?'—':m.calmar.toFixed(2))+'</td>'
+      +'<td>'+fmtPct(m.ulcer)+'</td>'
+      +'<td>'+(m.martin===null?'—':m.martin.toFixed(2))+'</td></tr>';
   });
   document.getElementById('cmpTable').innerHTML = html;
 }
@@ -1071,6 +1266,7 @@ function renderAll(){
 }
 renderNavLegend(); renderYearChart();
 if(!restoreWindowPref()) renderAll();   // 恢复上次所选区间, 恢复失败则展示全部
+setupAutoRefresh();                     // 界面已渲染完成, 需要时在后台静默更新数据
 })();
 </script>
 </body>
