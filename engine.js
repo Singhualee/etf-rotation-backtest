@@ -238,21 +238,12 @@
       prevNav = v;
     }
 
-    // 8. 基准: 各ETF买入持有 + 等权每日再平衡 + 等权持有(5%带宽再平衡)
-    var benchmarks = [], equalNav = [];
+    // 8. 基准: 各ETF买入持有 + 等权持有(5%带宽再平衡)
+    var benchmarks = [];
     for (var k6 = 0; k6 < K; k6++) {
       var b = [];
       for (var i6 = firstRebIdx; i6 < n; i6++) b.push(ffill[k6][i6] / ffill[k6][firstRebIdx]);
       benchmarks.push(b);
-    }
-    var ev = 1;
-    for (var i7 = firstRebIdx; i7 < n; i7++) {
-      if (i7 > firstRebIdx) {
-        var mean = 0;
-        for (var k7 = 0; k7 < K; k7++) mean += ffill[k7][i7] / ffill[k7][i7 - 1];
-        ev *= mean / K;
-      }
-      equalNav.push(ev);
     }
     // 等权持有(5%带宽再平衡): 期初资金四等分买入各ETF后持有,
     // 任一ETF权重偏离目标25%超过5个百分点(即权重<20%或>30%)时, 当日收盘再平衡回等权
@@ -273,10 +264,39 @@
       bandEqualNav.push(v9);
     }
 
+    // 8.1 可选纯对比基准: 只在既有 calendar 上做前向填充, 不参与选股/调仓/成本/等权,
+    //     也不进入 calendar 与 startIdx —— 晚上市时曲线自行晚开始, 不拖后策略回测起点
+    var cmpIn = options.compare;
+    if (cmpIn && !Array.isArray(cmpIn)) cmpIn = [cmpIn];
+    var compare = [], compareStart = [], compareCodes = [], compareLabels = [];
+    (cmpIn || []).forEach(function (c) {
+      if (!c || !c.dates || !c.closes || !c.dates.length) return;
+      var px = [], pi = -1;
+      for (var ic = 0; ic < n; ic++) {
+        while (pi + 1 < c.dates.length && c.dates[pi + 1] <= calendar[ic]) pi++;
+        px.push(pi >= 0 ? c.closes[pi] : null);
+      }
+      var ci = -1;
+      for (var ic2 = firstRebIdx; ic2 < n; ic2++) {
+        if (px[ic2] != null) { ci = ic2; break; }
+      }
+      if (ci < 0) return;
+      var line = [];
+      for (var ic3 = firstRebIdx; ic3 < n; ic3++) {
+        line.push(ic3 < ci ? null : px[ic3] / px[ci]);
+      }
+      compare.push(line);
+      compareStart.push(ci - firstRebIdx);
+      compareCodes.push(c.code || '');
+      compareLabels.push(c.label || c.code || '对比基准');
+    });
+
     return {
       dates: dates, nav: nav, holding: holding, switches: switches, rebalances: rebalances,
       primaryW: volTarget > 0 ? primaryW : null,
-      benchmarks: benchmarks, equalNav: equalNav, bandEqualNav: bandEqualNav,
+      benchmarks: benchmarks, bandEqualNav: bandEqualNav,
+      compare: compare, compareStart: compareStart,
+      compareCodes: compareCodes, compareLabels: compareLabels,
       bandRebCount: bandRebCount,
       rebCount: Object.keys(rebSet).length,
       codes: etfs.map(function (e) { return e.code; }),
@@ -381,8 +401,15 @@
       for (var k = 0; k < bt.benchmarks.length; k++) {
         row['b' + k] = bt.benchmarks[k][info.li] / bt.benchmarks[k][info.fi] - 1;
       }
-      row.equal = bt.equalNav[info.li] / bt.equalNav[info.fi] - 1;
       row.bandEqual = bt.bandEqualNav[info.li] / bt.bandEqualNav[info.fi] - 1;
+      // 对比基准: 起始年从它自己的首个可得日起算; 当年尚无数据则为 null(图上不画柱)
+      if (bt.compare) {
+        for (var ci = 0; ci < bt.compare.length; ci++) {
+          var cArr = bt.compare[ci], cBase = Math.max(info.fi, bt.compareStart[ci]);
+          row['c' + ci] = (cBase <= info.li && cArr[cBase] != null && cArr[info.li] != null)
+            ? cArr[info.li] / cArr[cBase] - 1 : null;
+        }
+      }
       out.push(row);
     });
     return out;

@@ -162,8 +162,19 @@ function independentSim(etfs, opts) {
   // 无波动率目标基线不受本次修改影响
   const btBase = RotationEngine.runBacktest(ETF_DATA.etfs, { lookback: 25, rebalanceWeekday: 4, costRate: 0.001, riskOff: { floor: 0, bondCode: BOND } });
   const mB = RotationEngine.computeMetrics(btBase, { rf: 0.02 });
-  check('基线(无vol)仍为 27.58%/16.21%', Math.abs(mB.annualized - 0.2758) < 0.0005 && Math.abs(mB.maxDD - 0.1621) < 0.0005,
+  // 该基线随 data.js 最新交易日延伸会有微小漂移; 更新数据时同步刷新, 并复核漂移是否只来自新增交易日
+  check('基线(无vol)仍为 27.15%/16.21%', Math.abs(mB.annualized - 0.2715) < 0.0005 && Math.abs(mB.maxDD - 0.1621) < 0.0005,
     (mB.annualized * 100).toFixed(2) + '/' + (mB.maxDD * 100).toFixed(2));
+
+  // 对比基准走独立通道: 带上它时策略净值/基准/日期必须逐字节不变
+  const btC = RotationEngine.runBacktest(ETF_DATA.etfs, { lookback: 25, rebalanceWeekday: 4, costRate: 0.001,
+    riskOff: { floor: 0, bondCode: BOND }, compare: ETF_DATA.compare });
+  check('compare 不改变策略净值/基准/日期',
+    JSON.stringify(btC.nav) === JSON.stringify(btBase.nav) &&
+    JSON.stringify(btC.benchmarks) === JSON.stringify(btBase.benchmarks) &&
+    JSON.stringify(btC.dates) === JSON.stringify(btBase.dates));
+  check('compare 从自身起点归一(首值=1)',
+    btC.compare.length === 1 && btC.compare[0][btC.compareStart[0]] === 1);
 }
 
 console.log('\n引擎级审查结果: ' + pass + ' PASS, ' + fail + ' FAIL');

@@ -5,7 +5,7 @@ var dir = __dirname;
 eval(fs.readFileSync(path.join(dir, 'engine.js'), 'utf8'));
 eval(fs.readFileSync(path.join(dir, 'data.js'), 'utf8'));
 
-var bt = RotationEngine.runBacktest(ETF_DATA.etfs, { lookback: 20 });
+var bt = RotationEngine.runBacktest(ETF_DATA.etfs, { lookback: 20, compare: ETF_DATA.compare });
 var metrics = RotationEngine.computeMetrics(bt, { rf: 0.02 });
 
 var out = {
@@ -14,7 +14,9 @@ var out = {
   nDays: bt.dates.length,
   nav: bt.nav,
   holding: bt.holding,
-  equalNav: bt.equalNav,
+  compare: bt.compare,
+  compareStart: bt.compareStart,
+  compareCodes: bt.compareCodes,
   bandEqualNav: bt.bandEqualNav,
   bandRebCount: bt.bandRebCount,
   benchmarks: bt.benchmarks,

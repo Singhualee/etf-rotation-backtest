@@ -152,9 +152,10 @@ tr.hl td{font-weight:700}
   3) 年化 = (1+总收益)^(252/交易日数) − 1；夏普 = (日均收益 − 日无风险利率)/日波动 × √252，无风险利率可用上方滑块调整（默认 2%）。<br>
   4) 最大回撤 / 当前回撤按日频净值相对历史峰值计算；卡玛 = 年化收益 / 最大回撤；周度胜率按 ISO 周聚合。<br>
   4b) 溃疡指数(Ulcer Index) = √(ΣDDᵢ²/n)，DDᵢ 为窗口内每个交易日的回撤深度，n 为交易天数，同时惩罚回撤的<b>深度</b>与<b>持续时间</b>，数值越小持有体验越好、0 表示从未回撤；马丁比率(Martin / UPI) = (年化收益 − 无风险利率) / 溃疡指数，可理解为用溃疡指数作分母的夏普，随上方无风险利率滑块联动。<br>
-  5) 等权每日再平衡 = 每日权重归一回 25%；等权 5% 带宽再平衡 = 期初各 25% 买入后持有，任一 ETF 权重偏离超过 5 个百分点（&lt;20% 或 &gt;30%）时当日收盘再平衡回等权。<br>
+  5) 等权 5% 带宽再平衡 = 期初各 25% 买入后持有，任一 ETF 权重偏离超过 5 个百分点（&lt;20% 或 &gt;30%）时当日收盘再平衡回等权。<br>
+  5b) 标普500ETF 513500 为<b>纯对比基准</b>：仅按前复权收盘价买入持有，不参与动量排名、调仓、交易成本与等权组合，也不参与回测起点判定。其数据自 2014-01-15 起（含份额折算，采用前复权），长历史模式下该曲线晚于策略起点开始；年度收益图 2013 年无数据，2014 年从其首个可得日起算。<br>
   6) 数据（<span id="dataNote"></span>）：510300/511260 用不复权日线+分红表按<b>标准等比前复权</b>重建（除息日因子仅作用于之前日期，分红不会被计成当日下跌），分红表经 Wind 月度锚点核对；513100 保留前复权序列（历史含份额折算处理）。刷新时通过"不复权与前复权差值步进"自动识别新分红、经除息日跌幅校验后并入分红表。回测区间由四只 ETF 数据齐备日（518850 上市后满 20 个交易日）决定。<br>
-  7) 数据保存分三层：① 点击"刷新数据"成功后自动存入浏览器本地缓存（localStorage，固定约 280KB，每次覆盖不累积），下次打开自动加载；② 点"保存副本"首次选择本网页文件并授权后，之后每次刷新会自动把最新数据写回该文件（需 Chrome/Edge 支持）；③ 不支持写回的环境会自动下载一份嵌入了最新数据的网页副本，用它替换旧文件即可永久保存。<br>
+  7) 数据保存分三层：① 点击"刷新数据"成功后自动存入浏览器本地缓存（localStorage，固定约 350KB，每次覆盖不累积），下次打开自动加载；② 点"保存副本"首次选择本网页文件并授权后，之后每次刷新会自动把最新数据写回该文件（需 Chrome/Edge 支持）；③ 不支持写回的环境会自动下载一份嵌入了最新数据的网页副本，用它替换旧文件即可永久保存。<br>
   8) 本结果仅为历史数据回放，不构成任何投资建议。
 </div>
 
@@ -163,7 +164,7 @@ tr.hl td{font-weight:700}
 'use strict';
 var COLORS = {'513100':'#2f6fed','511260':'#0f9e8e','518850':'#d99a1f','510300':'#7a5af5'};
 var APP_VER = 'Pro v1.2';   // 网页版本号, 显示在副标题便于分辨新旧副本
-var EQ_COLOR = '#8a93a0', BAND_COLOR = '#b06a3b', STRAT_COLOR = '#d93831';
+var BAND_COLOR = '#b06a3b', STRAT_COLOR = '#d93831', CMP_COLOR = '#b5179e';
 var etfs = ETF_DATA.etfs;
 // V2: 不复权+分红重建口径; 旧V1缓存为有缺陷的腾讯qfq数据, 自动作废
 var CACHE_KEY = 'etfRotationCacheV2';
@@ -190,6 +191,11 @@ var cacheInfo = null;   // 启动时若浏览器缓存比内嵌数据新则使�
       });
       if(ok) cacheInfo = c;
       if(c.dividends) etfs.forEach(function(e){ if(c.dividends[e.code]) e.dividends = c.dividends[e.code]; });
+      // 对比基准: 缓存较新时一并恢复; 结构不完整则保留内嵌版本, 不能用残缺对象覆盖
+      if(ok && c.compare && c.compare.dates && c.compare.closes &&
+         c.compare.dates.length > 500 && c.compare.dates.length === c.compare.closes.length){
+        ETF_DATA.compare = c.compare;
+      }
     }
   }catch(e){}
 })();
@@ -201,6 +207,7 @@ function stratOpts(){
     volTarget: +document.getElementById('volSel').value || 0,
     riskOff: document.getElementById('riskOffChk').checked ? {floor:0, bondCode:'511260'} : null,
     costRate: +document.getElementById('costSel').value,
+    compare: ETF_DATA.compare || null,   // 纯对比基准, 引擎不会让它参与排名/调仓/成本
   };
 }
 function stratTag(){
@@ -357,6 +364,7 @@ function saveCache(){
     etfs.forEach(function(e){ divmap[e.code]=e.dividends||(ETF_DATA.dividends&&ETF_DATA.dividends[e.code])||[]; });
     localStorage.setItem(CACHE_KEY, JSON.stringify({
       savedAt: todayStr(), endDate: dataEndDate(), dividends: divmap,
+      compare: ETF_DATA.compare || null,
       etfs: etfs.map(function(e){ return {code:e.code,label:e.label,symbol:e.symbol,dates:e.dates,closes:e.closes}; })
     }));
     return true;
@@ -370,7 +378,8 @@ function fetchSeries(symbol, fq, onPage){
     if(onPage) onPage();
     return fetchJson(url).then(function(res){
       var d = res && res.data && res.data[symbol];
-      var rows = d ? (d.day || d.qfqday || []) : [];
+      // qfq 请求优先 qfqday: 否则会拿到不复权价(513500 折算日会凭空跌约 50%)
+      var rows = d ? ((fq === 'qfq' ? (d.qfqday || d.day) : (d.day || d.qfqday)) || []) : [];
       if(!rows.length) return;
       // 抓取方向为从新到旧回溯, 不能用"仅接受更晚日期"的防重条件(会把回溯页全部滤掉),
       // 无条件收集, 最终统一去重排序
@@ -497,6 +506,7 @@ function buildUpdatedHtml(){
       etfs.forEach(function(e){ m[e.code]=e.dividends||(ETF_DATA.dividends&&ETF_DATA.dividends[e.code])||[]; });
       return m;
     })(),
+    compare: ETF_DATA.compare || null,
     etfs: etfs.map(function(e){ return {code:e.code,label:e.label,symbol:e.symbol,dates:e.dates,closes:e.closes}; })
   };
   var idx = DATA_SCRIPT_TEXT.indexOf('var ETF_DATA');
@@ -948,7 +958,9 @@ function navHitName(chart, x, y){     // 压在哪条曲线上? 没有则 null
     for(var si=0; si<navSrc.length; si++){
       var src = navSrc[si];
       if(!src || !navVisible[si]) continue;                 // 图例关掉的曲线不参与判定
-      var p = chart.convertToPixel({xAxisIndex:0, yAxisIndex:0}, [t, src.arr[win.i0+k]/src.base]);
+      var idx = win.i0 + k;
+      if(idx < (src.s0 || 0)) continue;                     // 基准尚未开始的那段不参与命中
+      var p = chart.convertToPixel({xAxisIndex:0, yAxisIndex:0}, [t, src.arr[idx]/src.base]);
       if(!p) continue;
       var d = Math.abs(p[1]-y);
       if(d <= bestD){ bestD = d; best = si; }               // 同距取后画的(视觉在上)
@@ -993,9 +1005,13 @@ function bindNavHover(chart){
     if(navFocusSeries!==null && navVisible[navSeriesNames.indexOf(navFocusSeries)]===false) navSetFocus(chart, null);
   });
 }
-function windowSeries(arr){
-  var out=[], base=arr[win.i0];
-  for(var i=win.i0;i<=win.i1;i++) out.push([bt.dates[i], arr[i]/base]);
+function windowSeries(arr, s0){
+  s0 = s0 || 0;
+  var st = Math.max(win.i0, s0);      // 对比基准可能晚于窗口起点开始
+  var base = arr[st];
+  if(base == null) return [];
+  var out=[];
+  for(var i=st;i<=win.i1;i++) out.push([bt.dates[i], arr[i]/base]);
   return out;
 }
 function renderNavChart(){
@@ -1006,7 +1022,14 @@ function renderNavChart(){
   etfs.forEach(function(e,k){
     series.push({name:e.label+' '+e.code, data:windowSeries(bt.benchmarks[k]), arr:bt.benchmarks[k], color:COLORS[e.code], w:1.3});
   });
-  series.push({name:'等权每日再平衡', data:windowSeries(bt.equalNav), arr:bt.equalNav, color:EQ_COLOR, w:1.5, dash:[6,4]});
+  // 纯对比基准: 引擎独立通道产出, 不参与动量排名/调仓/成本/等权
+  // 顺序固定为「对比基准在前、等权5%带宽在后」—— 净值图/图例/对比表/年度图四处必须同一顺序
+  var cmpArr = bt.compare || [];
+  for(var ci=0; ci<cmpArr.length; ci++){
+    series.push({name:bt.compareLabels[ci]+' '+bt.compareCodes[ci],
+      data:windowSeries(cmpArr[ci], bt.compareStart[ci]),
+      arr:cmpArr[ci], s0:bt.compareStart[ci], color:CMP_COLOR, w:1.5, dash:[5,3]});
+  }
   series.push({name:'等权5%带宽再平衡', data:windowSeries(bt.bandEqualNav), arr:bt.bandEqualNav, color:BAND_COLOR, w:1.5, dash:[2,3]});
   // 切换点标记: ▲ 画在策略曲线上, 颜色=切换后标的
   var dateIdx = {};
@@ -1030,7 +1053,8 @@ function renderNavChart(){
   navSrc = []; navVisible = [];
   series.forEach(function(s, si){
     if(s.marks){ navSrc[si] = null; navVisible[si] = true; return; }   // ▲ 切换点是叠在策略线上的标记, 不参与聚焦
-    navSrc[si] = {arr: s.arr, base: s.arr[win.i0]};
+    var s0 = s.s0 || 0;
+    navSrc[si] = {arr: s.arr, base: s.arr[Math.max(win.i0, s0)], s0: s0};
     navVisible[si] = !legendSel || legendSel[s.name] !== false;        // 图例关掉的曲线不参与判定
   });
   navTimes = [];
@@ -1079,8 +1103,11 @@ function renderNavChart(){
   }, true);
 }
 function renderNavLegend(){
-  var rows = [['动量轮动策略',STRAT_COLOR],['等权每日再平衡',EQ_COLOR],['等权5%带宽再平衡',BAND_COLOR]];
+  // 顺序与净值图 series 逐项一致: 策略 → 4只ETF → 对比基准 → 等权5%带宽
+  var rows = [['动量轮动策略',STRAT_COLOR]];
   etfs.forEach(function(e){ rows.push([e.label+' '+e.code, COLORS[e.code]]); });
+  (bt.compare||[]).forEach(function(a,k){ rows.push([bt.compareLabels[k]+' '+bt.compareCodes[k], CMP_COLOR]); });
+  rows.push(['等权5%带宽再平衡',BAND_COLOR]);
   document.getElementById('navLegend').innerHTML = rows.map(function(r){
     return '<span><i style="background:'+r[1]+'"></i>'+r[0]+'</span>';
   }).join('');
@@ -1158,10 +1185,10 @@ function renderHoldChart(){
 function renderYearChart(){
   var chart = getChart('yearChart');
   var labels = yearly.map(function(r){return r.year+'年'});
-  var mk=function(name,get,color){ return {name:name,type:'bar',data:yearly.map(function(r){return +(get(r)*100).toFixed(2)}),itemStyle:{color:color},barMaxWidth:14}; };
+  var mk=function(name,get,color){ return {name:name,type:'bar',data:yearly.map(function(r){ var v=get(r); return (v===null||v===undefined)?null:+(v*100).toFixed(2); }),itemStyle:{color:color},barMaxWidth:14}; };
   chart.setOption({
     animation:false, legend:{top:0,textStyle:{fontSize:12}},
-    tooltip:{trigger:'axis',valueFormatter:function(v){return v+'%'}},
+    tooltip:{trigger:'axis',valueFormatter:function(v){return (typeof v==='number'&&isFinite(v))?v+'%':'—'}},
     grid:{top:36,left:12,right:16,bottom:12,containLabel:true},
     xAxis:{type:'category',data:labels},
     yAxis:{type:'value',axisLabel:{formatter:'{value}%'}},
@@ -1171,7 +1198,8 @@ function renderYearChart(){
       mk('国债ETF',function(r){return r.b1},COLORS['511260']),
       mk('黄金ETF',function(r){return r.b2},COLORS['518850']),
       mk('沪深300',function(r){return r.b3},COLORS['510300']),
-      mk('等权每日',function(r){return r.equal},EQ_COLOR),
+      // 对比基准固定在「等权5%带宽」之前 —— 与净值图/图例/对比表同序
+      mk('标普500ETF',function(r){return r.c0},CMP_COLOR),
       mk('等权5%带宽',function(r){return r.bandEqual},BAND_COLOR)
     ]
   }, true);
@@ -1181,12 +1209,19 @@ function renderYearChart(){
 function renderCmpTable(){
   var rows = [{name:'动量轮动策略', arr:bt.nav, hl:true}];
   etfs.forEach(function(e,k){ rows.push({name:e.label+' '+e.code, arr:bt.benchmarks[k]}); });
-  rows.push({name:'等权每日再平衡', arr:bt.equalNav});
+  // 顺序固定为「对比基准在前、等权5%带宽在后」, 与净值图/图例/年度图一致
+  (bt.compare||[]).forEach(function(arr,k){
+    rows.push({name:bt.compareLabels[k]+' '+bt.compareCodes[k], arr:arr, s0:bt.compareStart[k]});
+  });
   rows.push({name:'等权5%带宽再平衡', arr:bt.bandEqualNav});
   var html = '<tr><th>组合</th><th>总收益率</th><th>年化收益率</th><th>夏普比率</th><th>最大回撤</th><th>卡玛比率</th><th>溃疡指数</th><th>马丁比率</th></tr>';
+  var EMPTY = '<td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td>';
   rows.forEach(function(r){
-    var m = RotationEngine.computeMetrics(pseudoBT(r.arr),{rf:rf,i0:win.i0,i1:win.i1});
-    html += '<tr'+(r.hl?' class="hl"':'')+'><td>'+(r.hl?'<span class="tag" style="background:'+STRAT_COLOR+'">策略</span> ':'' )+r.name+'</td>'
+    var i0 = Math.max(win.i0, r.s0 || 0);       // 对比基准晚开始时, 从它自己的起点算指标
+    var nameCell = '<td>'+(r.hl?'<span class="tag" style="background:'+STRAT_COLOR+'">策略</span> ':'' )+r.name+'</td>';
+    if (i0 > win.i1) { html += '<tr>'+nameCell+EMPTY+'</tr>'; return; }   // 整个窗口都早于基准起点
+    var m = RotationEngine.computeMetrics(pseudoBT(r.arr),{rf:rf,i0:i0,i1:win.i1});
+    html += '<tr'+(r.hl?' class="hl"':'')+'>'+nameCell
       +'<td class="'+cls(m.total)+'">'+fmtPct(m.total,true)+'</td>'
       +'<td class="'+cls(m.annualized)+'">'+fmtPct(m.annualized,true)+'</td>'
       +'<td>'+m.sharpe.toFixed(3)+'</td>'

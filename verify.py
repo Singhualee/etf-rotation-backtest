@@ -85,11 +85,21 @@ def run(bt_data):
         prev = v
 
     benchmarks = [[ffill[k][i] / ffill[k][first_reb] for i in range(first_reb, n)] for k in range(K)]
-    ev, equal_nav = 1.0, []
-    for i in range(first_reb, n):
-        if i > first_reb:
-            ev *= sum(ffill[k][i] / ffill[k][i - 1] for k in range(K)) / K
-        equal_nav.append(ev)
+    # ---- 纯对比基准(独立通道: 不参与选股/调仓/成本/等权, 也不进入 calendar 与起点判定) ----
+    compare, compare_start, compare_codes = [], [], []
+    cmp_raw = bt_data.get("compare")
+    if cmp_raw and cmp_raw.get("dates") and cmp_raw.get("closes"):
+        cdates, ccloses = cmp_raw["dates"], cmp_raw["closes"]
+        px, pi = [], -1
+        for i in range(n):
+            while pi + 1 < len(cdates) and cdates[pi + 1] <= calendar[i]:
+                pi += 1
+            px.append(ccloses[pi] if pi >= 0 else None)
+        ci = next((i for i in range(first_reb, n) if px[i] is not None), None)
+        if ci is not None:
+            compare.append([None if i < ci else px[i] / px[ci] for i in range(first_reb, n)])
+            compare_start.append(ci - first_reb)
+            compare_codes.append(cmp_raw.get("code", ""))
     # 等权持有(5%带宽再平衡): 期初各25%买入后持有,
     # 任一ETF权重偏离25%超过5个百分点(权重<20%或>30%)时, 当日收盘再平衡回等权
     band_units = [0.25 / ffill[k][first_reb] for k in range(K)]
@@ -136,7 +146,8 @@ def run(bt_data):
 
     return {
         "firstDate": dates[0], "lastDate": dates[-1], "nDays": len(dates),
-        "nav": nav, "holding": holding, "equalNav": equal_nav,
+        "nav": nav, "holding": holding,
+        "compare": compare, "compareStart": compare_start, "compareCodes": compare_codes,
         "bandEqualNav": band_equal_nav, "bandRebCount": band_reb_count,
         "benchmarks": benchmarks,
         "switches": [{"date": s["date"], "from": s["from"], "to": s["to"]} for s in switches],
@@ -179,14 +190,17 @@ def main():
     else:
         diff = max(abs(a - b) for a, b in zip(py["nav"], js["nav"]))
         cmp("净值最大绝对偏差", diff, 0, 1e-10)
-        diff_eq = max(abs(a - b) for a, b in zip(py["equalNav"], js["equalNav"]))
-        cmp("等权净值最大绝对偏差", diff_eq, 0, 1e-10)
         diff_he = max(abs(a - b) for a, b in zip(py["bandEqualNav"], js["bandEqualNav"]))
         cmp("等权5%带宽再平衡净值最大绝对偏差", diff_he, 0, 1e-10)
         cmp("等权5%带宽再平衡次数", py["bandRebCount"], js["bandRebCount"], tol=0.5)
         for k in range(len(py["benchmarks"])):
             db = max(abs(a - b) for a, b in zip(py["benchmarks"][k], js["benchmarks"][k]))
             cmp(f"基准{data['etfs'][k]['code']}净值最大偏差", db, 0, 1e-10)
+        for k in range(len(py["compare"])):
+            pairs = [(a, b) for a, b in zip(py["compare"][k], js["compare"][k]) if a is not None and b is not None]
+            db = max((abs(a - b) for a, b in pairs), default=0.0)
+            cmp(f"对比基准{py['compareCodes'][k]}净值最大偏差", db, 0, 1e-10)
+            cmp(f"对比基准{py['compareCodes'][k]}起始下标", py["compareStart"][k], js["compareStart"][k], tol=0.5)
         mism = [i for i, (a, b) in enumerate(zip(py["holding"], js["holding"])) if a != b]
         print(f"  {'PASS' if not mism else 'FAIL'}  持仓序列一致 ({len(mism)}处不一致)")
 

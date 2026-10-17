@@ -29,6 +29,7 @@ const PAGE = 640;
 const MIN_ROWS = 500;
 const DIV_ETF_CODES = ['510300', '511260'];    // 不复权 + 分红表 → 等比前复权
 const QFQ_ETF_CODES = ['513100', '518850'];    // 直接使用 qfq 序列
+const COMPARE_CODE = '513500';                 // 纯对比基准: 只做买入持有展示, 不进轮动池
 
 function todayStr() {
   const d = new Date();
@@ -68,7 +69,9 @@ async function fetchSeries(symbol, fq) {
     const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
     const j = await r.json();
     const d = j.data && j.data[symbol];
-    const rows = (d && (d.day || d.qfqday)) || [];
+    // qfq 请求必须优先 qfqday: 接口若同时返回 day, 取 day 会拿到不复权价
+    // (513500 有约 1:2 份额折算, 不复权序列会凭空多出约 -50% 的假跌幅)
+    const rows = (d && (fq === 'qfq' ? (d.qfqday || d.day) : (d.day || d.qfqday))) || [];
     if (!rows.length) break;
     rows.forEach(r => { const c = parseFloat(r[2]); if (r[0] && isFinite(c)) all.push([r[0], c]); });
     if (rows.length < PAGE) break;
@@ -198,8 +201,34 @@ const lastOf = s => (s && s.dates.length ? s.dates[s.dates.length - 1] : '');
   }
   const endDate = lasts[0];
 
+  // ---- 3a) 纯对比基准: 只刷新自身序列, 不参与上面的四只末日一致闸 ----
+  // 513500 是人民币计价 QDII, 因美股假期/停牌与 A 股 ETF 末日可能不同, 强行并入闸会误报
+  const prevCmp = ETF_DATA.compare || null;
+  let cmpChanged = false;
+  {
+    const sym = (prevCmp && prevCmp.symbol) || ('sh' + COMPARE_CODE);
+    console.log('== ' + COMPARE_CODE + ' 标普500ETF (qfq, 纯对比基准) ==');
+    const q = await fetchSeries(sym, 'qfq');
+    if (q.dates.length < MIN_ROWS) throw new Error(COMPARE_CODE + ' 抓取异常: 仅 ' + q.dates.length + ' 行');
+    // 折算/未复权护栏: 正常单日涨跌不应超过 25%, 触发即说明序列口径错了
+    for (let i = 1; i < q.closes.length; i++) {
+      const r = q.closes[i] / q.closes[i - 1] - 1;
+      if (Math.abs(r) > 0.25) throw new Error(COMPARE_CODE + ' 序列异常: ' + q.dates[i] + ' 单日 ' + (r * 100).toFixed(1) + '%');
+    }
+    const prevLast = lastOf(prevCmp);
+    const newLast = lastOf(q);
+    if (prevLast && newLast < prevLast) throw new Error(COMPARE_CODE + ' 末日回退: ' + prevLast + ' → ' + newLast);
+    ETF_DATA.compare = {
+      code: COMPARE_CODE, label: '标普500ETF', symbol: sym,
+      dates: q.dates, closes: q.closes,
+      note: '纯对比基准: 买入持有, 不参与动量排名/调仓/成本/等权组合; qfq 含份额折算'
+    };
+    cmpChanged = !prevCmp || newLast > prevLast;
+    console.log('  行数=' + q.dates.length + ' 首日=' + q.dates[0] + ' 末日=' + newLast);
+  }
+
   // ---- 3b) 无新交易日则跳过写入(节假日/同一天重复跑时避免无谓地改动文件) ----
-  if (!summary.some(s => s.prev && s.last > s.prev)) {
+  if (!summary.some(s => s.prev && s.last > s.prev) && !cmpChanged) {
     console.log('序列无变化(最新交易日仍为 ' + endDate + '), 跳过写入 data.js。');
     process.exit(0);
   }

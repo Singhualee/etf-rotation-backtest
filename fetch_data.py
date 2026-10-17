@@ -16,6 +16,8 @@ ETFS = [
 ]
 
 PAGE = 640
+# 纯对比基准: 只用于页面净值对比, 不进入 etfs(轮动池), 也不参与 commonStart
+COMPARE = ("sh513500", "513500", "标普500ETF")
 # 脚本自身目录: 不写死绝对路径, 便于在 CI/其他机器上直接运行
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data.js")
 
@@ -87,6 +89,16 @@ def main():
             "dates": dates, "closes": closes,
         })
         time.sleep(0.4)
+
+    # 纯对比基准: 单独抓取, 不进 etfs, 不影响 commonStart 与回测起点
+    csym, ccode, clabel = COMPARE
+    cd, cc = fetch_all(csym)
+    print(f"{ccode:<8}{clabel:<12}{cd[0]:<12}{cd[-1]:<12}{len(cd):>6}  (对比基准)")
+    result["compare"] = {
+        "code": ccode, "label": clabel, "symbol": csym,
+        "dates": cd, "closes": cc,
+        "note": "纯对比基准: 买入持有, 不参与动量排名/调仓/成本/等权组合",
+    }
 
     common = max(e["dates"][0] for e in result["etfs"])
     result["meta"] = {

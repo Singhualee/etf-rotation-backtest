@@ -540,6 +540,31 @@ setTimeout(async () => {
   const kit = navKit(domH);
   const NAME = kit.NAMES;
   check('净值图折线元素数=曲线数(7)', kit.polys().length === 7, kit.polys().length);
+  // 防假绿: 删一条 + 加一条后总数恰好不变, 必须靠名称断言确认"内容真的换了"
+  check('曲线集合不含已删除的「等权每日再平衡」', NAME.indexOf('等权每日再平衡') === -1, NAME.join('|'));
+  check('曲线集合含「标普500ETF」对比基准', NAME.some(n => n.indexOf('标普500ETF') === 0), NAME.join('|'));
+  const legendTxt = Array.from(document.querySelectorAll('#navLegend span')).map(e => e.textContent).join('|');
+  check('图例不含「等权每日再平衡」且含「标普500ETF」',
+    legendTxt.indexOf('等权每日再平衡') < 0 && legendTxt.indexOf('标普500ETF') >= 0, legendTxt);
+  const cmpTxt = document.getElementById('cmpTable').textContent;
+  check('对比表不含「等权每日再平衡」且含「标普500ETF」',
+    cmpTxt.indexOf('等权每日再平衡') < 0 && cmpTxt.indexOf('标普500ETF') >= 0);
+
+  // 顺序一致性: 「对比基准」必须排在「等权5%带宽再平衡」之前, 四个展示位置同一顺序。
+  // 只断言"存在"是不够的 —— 顺序反了照样能通过, 用户看到的就是两处不一致。
+  // 注意: 下面统一用 domH 自己的 document/echarts, 不能混用模块级 document(那是另一个 JSDOM 实例)
+  const dH = domH.window.document;
+  const isBefore = (list, a, b) => {
+    const ia = list.findIndex(n => n.indexOf(a) === 0), ib = list.findIndex(n => n.indexOf(b) === 0);
+    return ia >= 0 && ib >= 0 && ia < ib;
+  };
+  check('净值图序列顺序: 标普500ETF 在 等权5%带宽 之前', isBefore(NAME, '标普500ETF', '等权5%带宽'), NAME.join('|'));
+  const legendArr = Array.from(dH.querySelectorAll('#navLegend span')).map(e => e.textContent.trim());
+  check('净值图例顺序: 标普500ETF 在 等权5%带宽 之前', isBefore(legendArr, '标普500ETF', '等权5%带宽'), legendArr.join('|'));
+  const cmpRows = Array.from(dH.querySelectorAll('#cmpTable tr')).slice(1).map(tr => tr.querySelector('td').textContent.trim());
+  check('窗口对比表顺序: 标普500ETF 在 等权5%带宽 之前', isBefore(cmpRows, '标普500ETF', '等权5%带宽'), cmpRows.join('|'));
+  const yearNames = domH.window.echarts.getInstanceByDom(dH.getElementById('yearChart')).getOption().series.map(s => s.name);
+  check('年度收益图顺序: 标普500 在 等权5%带宽 之前', isBefore(yearNames, '标普500', '等权5%带宽'), yearNames.join('|'));
 
   const [fx, fy, fgap] = kit.farPoint(600);
   check('找得到"没压住任何曲线"的落点', fgap > 6, '间距=' + fgap.toFixed(1));
@@ -551,7 +576,8 @@ setTimeout(async () => {
 
   // 找策略曲线与其它曲线离得最远、且非切换日的一天来压(切换日的 ▲ 会盖住曲线)
   const sOptH = kit.chart.getOption().series;
-  const swDates = new Set((sOptH[7].data || []).map(d => d.switchRef && d.switchRef.date).filter(Boolean));
+  const SW_SI = sOptH.findIndex(s => s.name === '切换点');   // 不依赖"散点永远在末尾"
+  const swDates = new Set((sOptH[SW_SI].data || []).map(d => d.switchRef && d.switchRef.date).filter(Boolean));
   const pick = (() => {
     const P = kit.polys().map(el => Array.from(el.shape.points));
     let best = { i: -1, gap: -1 };
@@ -594,7 +620,7 @@ setTimeout(async () => {
   // 压住策略曲线时, 切换日的 ▲ 切换信息仍应保留(▲ 已设 silent, 指针会"看穿"到曲线)。
   // 注意: ▲ 所在那一点上, 别的基准曲线也可能正好压在策略曲线上, 此时高亮的是那条 —— 那是正常的
   // (明细与画面依然一致), 所以往后找第一个"策略曲线确实在最上面"的切换日来断言。
-  const swIdxAll = (sOptH[7].data || []).map(d => {
+  const swIdxAll = (sOptH[SW_SI].data || []).map(d => {
     if (!d.switchRef || d.switchRef.from === null || d.switchRef.from === d.switchRef.to) return -1;
     return sOptH[0].data.findIndex(x => x[0] === d.switchRef.date);
   }).filter(i => i >= 0);
@@ -667,7 +693,7 @@ setTimeout(async () => {
   }
   check('横向快速换列 6 组: 画面凸显与明细严格同一条', burstBad.length === 0, burstBad.slice(0, 4).join(' ; '));
 
-  const swIdx2 = (sOptH[7].data || [])
+  const swIdx2 = (sOptH[SW_SI].data || [])
     .map(d => d.switchRef ? sOptH[0].data.findIndex(x => x[0] === d.switchRef.date) : -1)
     .filter(i => i > 5).slice(0, 6);
   for (const i of swIdx2) {
